@@ -3,7 +3,7 @@
 提供HTML页面
 """
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.web.app import templates
 
@@ -12,7 +12,13 @@ router = APIRouter()
 
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    """首页"""
+    """首页 - 重定向到Flutter Web UI"""
+    return RedirectResponse(url="/flutter/", status_code=302)
+
+
+@router.get("/legacy", response_class=HTMLResponse)
+async def legacy_index(request: Request):
+    """旧版Jinja2首页（保留）"""
     return templates.TemplateResponse(
         "index.html",
         {"request": request, "title": "首页"}

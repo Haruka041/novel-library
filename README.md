@@ -38,7 +38,7 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/yourusername/novel-library.git
+git clone https://github.com/haruka041/novel-library.git
 cd novel-library
 
 # 配置环境变量
@@ -350,11 +350,11 @@ MIT License
 
 ## 📞 联系方式
 
-- 提交 Issue: https://github.com/yourusername/novel-library/issues
-- Pull Request: https://github.com/yourusername/novel-library/pulls
+- 提交 Issue: https://github.com/haruka041/novel-library/issues
+- Pull Request: https://github.com/haruka041/novel-library/pulls
 
 ---
 
-**Made with ❤️ by Your Name**
+**Made with ❤️ by haruka041**
 
 **⭐ 如果这个项目对你有帮助，请给个Star！**

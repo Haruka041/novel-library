@@ -96,7 +96,18 @@ async def list_libraries(
         select(Library).where(Library.id.in_(accessible_library_ids))
     )
     libraries = result.scalars().all()
-    return libraries
+    
+    # 手动构建响应，转换 datetime 为字符串
+    response = []
+    for library in libraries:
+        response.append({
+            "id": library.id,
+            "name": library.name,
+            "path": library.path,
+            "last_scan": library.last_scan.isoformat() if library.last_scan else None,
+        })
+    
+    return response
 
 
 @router.post("/libraries", response_model=LibraryResponse)
@@ -184,9 +195,9 @@ async def list_books(
     
     query = query.order_by(Book.added_at.desc())
     
-    # 获取所有符合条件的书籍
+    # 获取所有符合条件的书籍（使用unique()去重，因为有joinedload关联）
     result = await db.execute(query)
-    all_books = result.scalars().all()
+    all_books = result.unique().scalars().all()
     
     # 应用内容分级过滤
     filtered_books = []
@@ -417,7 +428,7 @@ async def search_books(
     query = query.order_by(Book.title)
     
     result = await db.execute(query)
-    all_books = result.scalars().all()
+    all_books = result.unique().scalars().all()
     
     # 应用内容分级过滤
     filtered_books = []
