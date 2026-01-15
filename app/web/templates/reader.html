@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="flex items-center justify-center min-h-screen">
+    <div class="text-center">
+        <div class="loading-spinner"></div>
+        <p class="mt-4 text-gray-600">正在加载阅读器...</p>
+    </div>
+</div>
+
+<script>
+// 获取书籍ID
+const bookId = {{ book_id }};
+
+// 获取书籍信息并跳转到对应的阅读器
+async function loadReader() {
+    try {
+        const response = await fetch(`/api/books/${bookId}`, {
+            headers: {
+                'Authorization': `Bearer ${localStorage.getItem('token')}`
+            }
+        });
+        
+        if (!response.ok) {
+            if (response.status === 401) {
+                window.location.href = '/login';
+                return;
+            }
+            throw new Error('无法加载书籍信息');
+        }
+        
+        const book = await response.json();
+        const format = book.file_format.toLowerCase();
+        
+        // 根据格式跳转到对应的阅读器
+        if (format === '.txt') {
+            window.location.href = `/reader/txt/${bookId}`;
+        } else if (format === '.epub') {
+            window.location.href = `/reader/epub/${bookId}`;
+        } else {
+            alert(`暂不支持 ${format} 格式的在线阅读，请下载后使用专业阅读器打开。`);
+            window.history.back();
+        }
+    } catch (error) {
+        console.error('加载阅读器失败:', error);
+        alert('加载阅读器失败: ' + error.message);
+        window.history.back();
+    }
+}
+
+// 页面加载时执行
+loadReader();
+</script>
+{% endblock %}

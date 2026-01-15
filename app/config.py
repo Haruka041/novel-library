@@ -77,6 +77,44 @@ class OPDSConfig(BaseModel):
     page_size: int = 50
 
 
+class RBACConfig(BaseModel):
+    """权限控制配置"""
+    default_age_rating: str = "all"  # 新用户默认年龄分级限制
+    require_library_assignment: bool = True  # 新用户是否需要手动分配书库
+    public_libraries_enabled: bool = True  # 是否允许公共书库
+
+
+class CoverConfig(BaseModel):
+    """封面配置"""
+    quality: int = 85  # JPG 压缩质量 (1-100)
+    max_width: int = 800  # 最大宽度（像素）
+    max_height: int = 1200  # 最大高度（像素）
+    thumbnail_width: int = 300  # 缩略图宽度（像素）
+    thumbnail_height: int = 450  # 缩略图高度（像素）
+    default_style: str = "gradient"  # 默认封面风格 (gradient/letter/book/minimal)
+    cache_enabled: bool = True  # 是否启用缓存
+
+
+class BackupConfig(BaseModel):
+    """备份配置"""
+    backup_path: str = "/app/data/backups"  # 备份文件保存路径
+    retention_count: int = 7  # 保留备份数量
+    auto_backup_enabled: bool = False  # 是否启用自动备份
+    auto_backup_schedule: str = "0 2 * * *"  # Cron 表达式（默认每天凌晨2点）
+    default_includes: List[str] = Field(default_factory=lambda: ["database", "covers", "config"])  # 默认备份内容
+    compression_level: int = 6  # ZIP 压缩级别 (0-9)
+
+
+class TelegramConfig(BaseModel):
+    """Telegram Bot 配置"""
+    enabled: bool = False  # 是否启用 Telegram Bot
+    bot_token: str = ""  # Bot Token（从 @BotFather 获取）
+    webhook_url: str = ""  # Webhook URL（可选，留空则使用轮询模式）
+    webhook_path: str = "/webhook/telegram"  # Webhook 路径
+    max_file_size: int = 20 * 1024 * 1024  # 最大文件大小（20MB，Telegram限制）
+    bind_code_expiry: int = 300  # 绑定授权码过期时间（秒，默认5分钟）
+
+
 class Config(BaseModel):
     """主配置类"""
     server: ServerConfig = Field(default_factory=ServerConfig)
@@ -88,6 +126,10 @@ class Config(BaseModel):
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     opds: OPDSConfig = Field(default_factory=OPDSConfig)
+    rbac: RBACConfig = Field(default_factory=RBACConfig)
+    cover: CoverConfig = Field(default_factory=CoverConfig)
+    backup: BackupConfig = Field(default_factory=BackupConfig)
+    telegram: TelegramConfig = Field(default_factory=TelegramConfig)
 
     @classmethod
     def load(cls, config_path: str = "config/config.yaml") -> "Config":

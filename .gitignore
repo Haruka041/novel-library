@@ -20,12 +20,22 @@ wheels/
 .installed.cfg
 *.egg
 MANIFEST
-
-# Virtual Environment
+*.log
+local_settings.py
+instance/
+.webassets-cache
+.env
+.venv
+env/
 venv/
 ENV/
-env/
-.venv
+env.bak/
+venv.bak/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
 
 # IDE
 .vscode/
@@ -33,22 +43,41 @@ env/
 *.swp
 *.swo
 *~
-
-# Environment
-.env
-.env.local
-
-# Application Data
-data/
-covers/
-*.db
-*.log
-
-# OS
 .DS_Store
-Thumbs.db
 
-# Testing
-.pytest_cache/
+# Project specific
+data/
+config/config.yaml
+*.log
 .coverage
 htmlcov/
+.pytest_cache/
+
+# Flutter
+flutter_app/.dart_tool/
+flutter_app/.flutter-plugins
+flutter_app/.flutter-plugins-dependencies
+flutter_app/.packages
+flutter_app/build/
+flutter_app/.pub-cache/
+flutter_app/.pub/
+flutter_app/pubspec.lock
+
+# Compiled files
+*.pyc
+*.pyo
+*.class
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# OS
+Thumbs.db
+.DS_Store

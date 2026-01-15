@@ -7,9 +7,12 @@
     <div class="bg-white shadow rounded-lg p-6">
         <h2 class="text-2xl font-bold mb-4">书库浏览</h2>
         
-        <div class="mb-6">
-            <input type="text" id="search-input" placeholder="搜索书名或作者..."
-                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <div class="mb-6 flex gap-3">
+            <input type="text" id="search-input" placeholder="搜索书名或作者... (回车跳转到高级搜索)"
+                   class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <a href="/search" class="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center gap-2">
+                🔍 高级搜索
+            </a>
         </div>
 
         <div id="books-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -31,6 +34,23 @@
 <script>
 let currentPage = 1;
 let isLoading = false;
+
+// 搜索框回车跳转
+document.addEventListener('DOMContentLoaded', () => {
+    const searchInput = document.getElementById('search-input');
+    searchInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            const query = searchInput.value.trim();
+            if (query) {
+                window.location.href = `/search?q=${encodeURIComponent(query)}`;
+            } else {
+                window.location.href = '/search';
+            }
+        }
+    });
+    
+    loadBooks();
+});
 
 async function loadBooks() {
     if (isLoading) return;
@@ -72,9 +92,10 @@ function displayBooks(books) {
     
     books.forEach(book => {
         const bookCard = document.createElement('div');
-        bookCard.className = 'bg-white border border-gray-200 rounded-lg p-4 hover:shadow-lg transition-shadow';
+        bookCard.className = 'bg-white border border-gray-200 rounded-lg p-4 hover:shadow-lg transition-shadow cursor-pointer';
+        bookCard.onclick = () => window.location.href = `/book/${book.id}`;
         bookCard.innerHTML = `
-            <h3 class="text-lg font-semibold mb-2">${book.title}</h3>
+            <h3 class="text-lg font-semibold mb-2 text-blue-600 hover:text-blue-800">${book.title}</h3>
             <p class="text-gray-600 text-sm mb-2">作者: ${book.author_name || '未知'}</p>
             <p class="text-gray-500 text-xs mb-2">格式: ${book.file_format}</p>
             <p class="text-gray-500 text-xs">大小: ${formatFileSize(book.file_size)}</p>
@@ -89,7 +110,5 @@ function formatFileSize(bytes) {
     if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
     return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
 }
-
-document.addEventListener('DOMContentLoaded', loadBooks);
 </script>
 {% endblock %}

@@ -1,10 +1,13 @@
 """
 MOBI/AZW3元数据解析器
-从MOBI文件中提取元数据
+从MOBI文件中提取元数据和封面
 """
 from pathlib import Path
 from typing import Dict, Optional
+import shutil
+import os
 
+from app.config import settings
 from app.utils.logger import log
 
 
@@ -14,8 +17,6 @@ class MobiParser:
     def parse(self, file_path: Path) -> Dict[str, Optional[str]]:
         """
         解析MOBI/AZW3文件元数据
-        
-        注意：mobi库的支持有限，主要从文件名解析
         
         Args:
             file_path: MOBI文件路径
@@ -30,7 +31,6 @@ class MobiParser:
             tempdir, filepath = mobi.extract(str(file_path))
             
             # 读取OPF文件获取元数据
-            import os
             opf_file = None
             for root, dirs, files in os.walk(tempdir):
                 for file in files:
@@ -40,21 +40,27 @@ class MobiParser:
                 if opf_file:
                     break
             
+            metadata = {}
             if opf_file:
                 metadata = self._parse_opf(opf_file)
-                
-                # 清理临时文件
-                import shutil
-                shutil.rmtree(tempdir, ignore_errors=True)
-                
-                log.info(f"成功解析MOBI: {file_path.name} -> {metadata['title']}")
-                return metadata
             else:
-                # 清理临时文件
-                import shutil
-                shutil.rmtree(tempdir, ignore_errors=True)
-                
-                raise Exception("未找到OPF文件")
+                # 使用文件名作为默认值
+                metadata = {
+                    "title": file_path.stem,
+                    "author": None,
+                    "description": None,
+                    "publisher": None,
+                }
+            
+            # 尝试提取封面
+            cover_path = self._extract_cover(tempdir, file_path)
+            metadata["cover"] = cover_path
+            
+            # 清理临时文件
+            shutil.rmtree(tempdir, ignore_errors=True)
+            
+            log.info(f"成功解析MOBI: {file_path.name} -> {metadata.get('title', file_path.stem)}")
+            return metadata
                 
         except Exception as e:
             log.warning(f"MOBI解析失败，使用文件名: {file_path}, 错误: {e}")
@@ -105,7 +111,6 @@ class MobiParser:
                 "author": author,
                 "description": description,
                 "publisher": publisher,
-                "cover": None,  # MOBI封面提取较复杂，暂不实现
             }
             
         except Exception as e:
@@ -115,5 +120,68 @@ class MobiParser:
                 "author": None,
                 "description": None,
                 "publisher": None,
-                "cover": None,
             }
+    
+    def _extract_cover(self, tempdir: str, file_path: Path) -> Optional[str]:
+        """
+        从MOBI解压目录中提取封面
+        
+        Args:
+            tempdir: 临时解压目录
+            file_path: 原始MOBI文件路径
+            
+        Returns:
+            封面图片保存路径，如果没有封面返回None
+        """
+        try:
+            from PIL import Image
+            from io import BytesIO
+            
+            # 查找封面图片
+            cover_image_path = None
+            
+            # 方法1: 查找常见封面文件名
+            for root, dirs, files in os.walk(tempdir):
+                for file in files:
+                    file_lower = file.lower()
+                    if any(name in file_lower for name in ['cover', 'jacket']):
+                        if file_lower.endswith(('.jpg', '.jpeg', '.png', '.gif')):
+                            cover_image_path = os.path.join(root, file)
+                            break
+                if cover_image_path:
+                    break
+            
+            # 方法2: 如果没找到，查找第一张图片（通常是封面）
+            if not cover_image_path:
+                for root, dirs, files in os.walk(tempdir):
+                    for file in files:
+                        if file.lower().endswith(('.jpg', '.jpeg', '.png', '.gif')):
+                            cover_image_path = os.path.join(root, file)
+                            break
+                    if cover_image_path:
+                        break
+            
+            if not cover_image_path:
+                log.debug(f"未找到MOBI封面: {file_path.name}")
+                return None
+            
+            # 保存封面
+            cover_dir = Path(settings.directories.covers)
+            cover_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 使用文件hash作为封面文件名
+            from app.utils.file_hash import calculate_file_hash
+            file_hash = calculate_file_hash(file_path)
+            cover_save_path = cover_dir / f"{file_hash}.jpg"
+            
+            # 转换并保存为JPG
+            img = Image.open(cover_image_path)
+            img = img.convert('RGB')
+            img.save(cover_save_path, 'JPEG', quality=85)
+            
+            log.debug(f"提取MOBI封面: {cover_save_path}")
+            return str(cover_save_path)
+            
+        except Exception as e:
+            log.warning(f"提取MOBI封面失败: {file_path}, 错误: {e}")
+            return None

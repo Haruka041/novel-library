@@ -16,7 +16,7 @@ from app.core.extractor import Extractor
 from app.core.metadata.epub_parser import EpubParser
 from app.core.metadata.mobi_parser import MobiParser
 from app.core.metadata.txt_parser import TxtParser
-from app.models import Author, Book, Library
+from app.models import Author, Book, BookVersion, Library
 from app.utils.file_hash import calculate_file_hash
 from app.utils.logger import log
 
@@ -29,8 +29,8 @@ class Scanner:
         self.extractor = Extractor()
         self.deduplicator = Deduplicator(db)
         
-        # 初始化解析器
-        self.txt_parser = TxtParser()
+        # 初始化解析器（传入数据库会话以支持动态规则）
+        self.txt_parser = TxtParser(db)
         self.epub_parser = EpubParser()
         self.mobi_parser = MobiParser()
         
@@ -62,6 +62,9 @@ class Scanner:
         
         log.info(f"开始扫描书库: {library.name} ({library.path})")
         
+        # 加载自定义文件名解析规则
+        await self.txt_parser.load_custom_patterns()
+        
         stats = {
             "scanned": 0,
             "added": 0,
@@ -86,6 +89,9 @@ class Scanner:
             except Exception as e:
                 log.error(f"处理文件失败: {file_path}, 错误: {e}")
                 stats["errors"] += 1
+        
+        # 更新文件名规则统计信息
+        await self.txt_parser.update_pattern_stats()
         
         # 更新书库最后扫描时间
         library.last_scan = datetime.utcnow()
@@ -151,7 +157,7 @@ class Scanner:
     
     async def _process_ebook(self, file_path: Path, library_id: int, stats: dict):
         """
-        处理电子书文件
+        处理电子书文件（支持版本管理）
         
         Args:
             file_path: 电子书路径
@@ -166,22 +172,25 @@ class Scanner:
             stats["skipped"] += 1
             return
         
-        # 去重检测
-        is_dup, reason = await self.deduplicator.is_duplicate(
+        # 去重检测（支持版本管理）
+        action, book_id, reason = await self.deduplicator.check_duplicate(
             file_path,
             metadata["title"],
             metadata.get("author")
         )
         
-        if is_dup:
+        if action == 'skip':
             log.info(f"跳过重复文件: {file_path} ({reason})")
             stats["skipped"] += 1
             return
-        
-        # 保存到数据库
-        await self._save_book(file_path, library_id, metadata)
-        stats["added"] += 1
-        log.info(f"添加书籍: {metadata['title']} by {metadata.get('author', 'Unknown')}")
+        elif action == 'add_version':
+            log.info(f"添加新版本: {file_path} ({reason})")
+            await self._save_book_version(file_path, book_id, metadata)
+            stats["added"] += 1
+        else:  # new_book
+            log.info(f"添加新书籍: {metadata['title']} by {metadata.get('author', 'Unknown')}")
+            await self._save_book(file_path, library_id, metadata)
+            stats["added"] += 1
     
     def _extract_metadata(self, file_path: Path) -> Optional[dict]:
         """
@@ -211,7 +220,7 @@ class Scanner:
     
     async def _save_book(self, file_path: Path, library_id: int, metadata: dict):
         """
-        保存书籍到数据库
+        保存新书籍到数据库（包含主版本）
         
         Args:
             file_path: 文件路径
@@ -223,26 +232,107 @@ class Scanner:
         if metadata.get("author"):
             author_id = await self._get_or_create_author(metadata["author"])
         
-        # 计算文件Hash
-        file_hash = calculate_file_hash(file_path, settings.deduplicator.hash_algorithm)
-        
-        # 创建书籍记录
+        # 创建书籍主记录
         book = Book(
             library_id=library_id,
             title=metadata["title"],
             author_id=author_id,
-            file_path=str(file_path.absolute()),
-            file_name=file_path.name,
-            file_format=file_path.suffix.lower(),
-            file_size=file_path.stat().st_size,
-            file_hash=file_hash,
             cover_path=metadata.get("cover"),
             description=metadata.get("description"),
             publisher=metadata.get("publisher"),
         )
         
         self.db.add(book)
+        await self.db.flush()  # 获取book.id但不提交
+        
+        # 创建主版本
+        file_hash = calculate_file_hash(file_path, settings.deduplicator.hash_algorithm)
+        quality = self._determine_quality(file_path)
+        
+        version = BookVersion(
+            book_id=book.id,
+            file_path=str(file_path.absolute()),
+            file_name=file_path.name,
+            file_format=file_path.suffix.lower(),
+            file_size=file_path.stat().st_size,
+            file_hash=file_hash,
+            quality=quality,
+            is_primary=True,  # 第一个版本默认为主版本
+        )
+        
+        self.db.add(version)
         await self.db.commit()
+    
+    async def _save_book_version(self, file_path: Path, book_id: int, metadata: dict):
+        """
+        为现有书籍添加新版本
+        
+        Args:
+            file_path: 文件路径
+            book_id: 书籍ID
+            metadata: 元数据
+        """
+        # 计算文件Hash
+        file_hash = calculate_file_hash(file_path, settings.deduplicator.hash_algorithm)
+        quality = self._determine_quality(file_path)
+        
+        # 检查是否已有主版本，如果没有则设为主版本
+        result = await self.db.execute(
+            select(BookVersion)
+            .where(BookVersion.book_id == book_id)
+            .where(BookVersion.is_primary == True)
+        )
+        has_primary = result.scalar_one_or_none() is not None
+        
+        # 创建新版本
+        version = BookVersion(
+            book_id=book_id,
+            file_path=str(file_path.absolute()),
+            file_name=file_path.name,
+            file_format=file_path.suffix.lower(),
+            file_size=file_path.stat().st_size,
+            file_hash=file_hash,
+            quality=quality,
+            is_primary=not has_primary,  # 如果没有主版本，设为主版本
+        )
+        
+        self.db.add(version)
+        await self.db.commit()
+    
+    def _determine_quality(self, file_path: Path) -> str:
+        """
+        根据文件属性判断质量
+        
+        Args:
+            file_path: 文件路径
+            
+        Returns:
+            质量等级：'low', 'medium', 'high'
+        """
+        file_format = file_path.suffix.lower()
+        file_size = file_path.stat().st_size
+        
+        # 基于格式的初步判断
+        format_quality = {
+            '.epub': 'high',
+            '.mobi': 'medium',
+            '.azw3': 'high',
+            '.txt': 'low',
+        }
+        
+        base_quality = format_quality.get(file_format, 'medium')
+        
+        # 基于文件大小调整（简单规则）
+        # EPUB/MOBI: >2MB = high, 500KB-2MB = medium, <500KB = low
+        if file_format in ['.epub', '.mobi', '.azw3']:
+            if file_size > 2 * 1024 * 1024:
+                return 'high'
+            elif file_size > 500 * 1024:
+                return 'medium'
+            else:
+                return 'low'
+        
+        return base_quality
     
     async def _get_or_create_author(self, author_name: str) -> int:
         """
