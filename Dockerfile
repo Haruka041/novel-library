@@ -9,25 +9,38 @@ RUN apt-get update && apt-get install -y \
     xz-utils \
     zip \
     libglu1-mesa \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# 安装Flutter SDK
+# 安装Flutter SDK - 使用3.16版本（Dart 3.2，兼容SDK >=3.0.0）
 ENV FLUTTER_HOME=/opt/flutter
 ENV PATH="$FLUTTER_HOME/bin:$PATH"
 
-RUN git clone https://github.com/flutter/flutter.git -b stable $FLUTTER_HOME && \
-    flutter --version && \
+# 国内镜像加速
+ENV PUB_HOSTED_URL=https://pub.flutter-io.cn
+ENV FLUTTER_STORAGE_BASE_URL=https://storage.flutter-io.cn
+
+# 克隆特定版本的Flutter
+RUN git clone https://github.com/flutter/flutter.git -b 3.16.9 --depth 1 $FLUTTER_HOME && \
+    flutter doctor -v && \
     flutter config --no-analytics && \
-    flutter precache --web
+    flutter config --enable-web && \
+    flutter precache --web --no-android --no-ios --no-linux --no-windows --no-macos
 
 # 复制Flutter项目
 WORKDIR /build
-COPY flutter_app/ ./flutter_app/
+COPY flutter_app/pubspec.yaml flutter_app/pubspec.lock* ./flutter_app/
+
+# 预先下载依赖（利用Docker缓存）
+WORKDIR /build/flutter_app
+RUN flutter pub get || true
+
+# 复制所有源代码
+COPY flutter_app/ ./
 
 # 构建Flutter Web
-WORKDIR /build/flutter_app
 RUN flutter pub get && \
-    flutter build web --release --web-renderer html
+    flutter build web --release --web-renderer canvaskit
 
 # ==================== 阶段2: Python应用 ====================
 FROM python:3.11-slim
