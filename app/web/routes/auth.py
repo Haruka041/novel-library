@@ -2,7 +2,7 @@
 认证路由
 处理用户登录、注册等
 """
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -35,23 +35,11 @@ class UserResponse(BaseModel):
     email: Optional[str] = None
     is_admin: bool
     age_rating_limit: str = "all"
-    telegram_id: Optional[int] = None
-    created_at: str
+    telegram_id: Optional[str] = None
+    created_at: datetime
     
     class Config:
         from_attributes = True
-        
-    @classmethod
-    def from_orm(cls, user: User):
-        return cls(
-            id=user.id,
-            username=user.username,
-            email=None,  # 暂时没有email字段
-            is_admin=user.is_admin,
-            age_rating_limit=user.age_rating_limit if hasattr(user, 'age_rating_limit') else 'all',
-            telegram_id=user.telegram_id if hasattr(user, 'telegram_id') else None,
-            created_at=user.created_at.isoformat() if hasattr(user, 'created_at') else ""
-        )
 
 
 async def get_current_user(
