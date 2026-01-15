@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  novel-library:
+    build: .
+    container_name: novel-library
+    ports:
+      - "8080:8080"
+    volumes:
+      # 媒体库目录（只读挂载，您的小说文件存放位置）
+      - /path/to/your/novels:/data/novels:ro
+      # 应用数据（数据库、日志等）
+      - ./data:/app/data
+      # 封面缓存
+      - ./covers:/app/covers
+      # 配置文件
+      - ./config:/app/config
+    environment:
+      - TZ=Asia/Shanghai
+      - LOG_LEVEL=INFO
+      # 默认管理员账户（首次启动时创建）
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=admin123
+      # 请修改为随机密钥
+      - SECRET_KEY=your-secret-key-change-this-to-random-string
+    restart: unless-stopped

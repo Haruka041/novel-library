@@ -1,0 +1,66 @@
+# 小说书库管理系统配置文件
+
+# 服务器配置
+server:
+  host: 0.0.0.0
+  port: 8080
+  reload: false
+
+# 数据库配置
+database:
+  url: sqlite+aiosqlite:///data/library.db
+
+# 目录配置
+directories:
+  data: /app/data
+  covers: /app/covers
+  temp: /tmp/novel-library
+
+# 扫描配置
+scanner:
+  interval: 3600  # 扫描间隔（秒），3600 = 1小时
+  recursive: true
+  supported_formats:
+    - .txt
+    - .epub
+    - .mobi
+    - .azw3
+    - .zip
+    - .rar
+    - .7z
+    - .iso
+    - .tar.gz
+    - .tar.bz2
+
+# 解压配置
+extractor:
+  max_file_size: 524288000  # 500MB
+  encoding: utf-8
+  nested_depth: 3
+
+# 去重配置
+deduplicator:
+  enable: true
+  hash_algorithm: md5
+  similarity_threshold: 0.85
+
+# 安全配置
+security:
+  secret_key: "CHANGE_THIS_TO_A_RANDOM_SECRET_KEY"  # 请修改为随机密钥
+  algorithm: HS256
+  access_token_expire_minutes: 10080  # 7天
+
+# 日志配置
+logging:
+  level: INFO
+  format: json
+  max_size: 10485760  # 10MB
+  backup_count: 5
+  file: /app/data/logs/app.log
+
+# OPDS配置
+opds:
+  title: "我的小说书库"
+  author: "Novel Library"
+  description: "个人小说收藏"
+  page_size: 50

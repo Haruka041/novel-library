@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  novel-library:
+    # 使用 GitHub Container Registry 的镜像
+    # 替换 YOUR_GITHUB_USERNAME 为你的 GitHub 用户名
+    image: ghcr.io/YOUR_GITHUB_USERNAME/novel-library:latest
+    container_name: novel-library
+    ports:
+      - "8080:8080"
+    volumes:
+      # 媒体库目录（只读挂载，您的小说文件存放位置）
+      # 修改 /path/to/your/novels 为你服务器上的实际路径
+      - /path/to/your/novels:/data/novels:ro
+      # 应用数据（数据库、日志等）
+      - ./data:/app/data
+      # 封面缓存
+      - ./covers:/app/covers
+      # 配置文件
+      - ./config:/app/config
+    environment:
+      - TZ=Asia/Shanghai
+      - LOG_LEVEL=INFO
+      # 默认管理员账户（首次启动时创建）
+      - ADMIN_USERNAME=admin
+      # 请修改为强密码！
+      - ADMIN_PASSWORD=CHANGE_THIS_PASSWORD
+      # 请修改为随机密钥（可以使用：openssl rand -hex 32 生成）
+      - SECRET_KEY=CHANGE_THIS_TO_RANDOM_STRING
+    restart: unless-stopped

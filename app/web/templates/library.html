@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+
+{% block title %}书库 - 小说书库{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 sm:px-0">
+    <div class="bg-white shadow rounded-lg p-6">
+        <h2 class="text-2xl font-bold mb-4">书库浏览</h2>
+        
+        <div class="mb-6">
+            <input type="text" id="search-input" placeholder="搜索书名或作者..."
+                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+
+        <div id="books-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <!-- 书籍列表将通过JavaScript动态加载 -->
+        </div>
+
+        <div id="loading" class="text-center py-8">
+            <p class="text-gray-500">加载中...</p>
+        </div>
+
+        <div id="empty" class="text-center py-8 hidden">
+            <p class="text-gray-500">暂无书籍</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentPage = 1;
+let isLoading = false;
+
+async function loadBooks() {
+    if (isLoading) return;
+    isLoading = true;
+
+    const token = localStorage.getItem('access_token');
+    if (!token) {
+        window.location.href = '/login';
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/books?page=${currentPage}&limit=20`, {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+
+        if (response.ok) {
+            const books = await response.json();
+            displayBooks(books);
+            document.getElementById('loading').classList.add('hidden');
+            
+            if (books.length === 0 && currentPage === 1) {
+                document.getElementById('empty').classList.remove('hidden');
+            }
+        } else if (response.status === 401) {
+            window.location.href = '/login';
+        }
+    } catch (error) {
+        console.error('加载书籍失败:', error);
+    } finally {
+        isLoading = false;
+    }
+}
+
+function displayBooks(books) {
+    const container = document.getElementById('books-container');
+    
+    books.forEach(book => {
+        const bookCard = document.createElement('div');
+        bookCard.className = 'bg-white border border-gray-200 rounded-lg p-4 hover:shadow-lg transition-shadow';
+        bookCard.innerHTML = `
+            <h3 class="text-lg font-semibold mb-2">${book.title}</h3>
+            <p class="text-gray-600 text-sm mb-2">作者: ${book.author_name || '未知'}</p>
+            <p class="text-gray-500 text-xs mb-2">格式: ${book.file_format}</p>
+            <p class="text-gray-500 text-xs">大小: ${formatFileSize(book.file_size)}</p>
+        `;
+        container.appendChild(bookCard);
+    });
+}
+
+function formatFileSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
+    if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+    return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+}
+
+document.addEventListener('DOMContentLoaded', loadBooks);
+</script>
+{% endblock %}
