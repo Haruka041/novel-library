@@ -42,3 +42,7 @@ async def init_db():
     """初始化数据库，创建所有表"""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+
+# 别名，保持兼容性
+init_database = init_db
