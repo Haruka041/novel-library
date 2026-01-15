@@ -62,6 +62,9 @@ app = FastAPI(
 # 配置静态文件
 app.mount("/static", StaticFiles(directory="app/web/static"), name="static")
 
+# 挂载Flutter Web UI
+app.mount("/flutter", StaticFiles(directory="app/web/static/flutter", html=True), name="flutter")
+
 # 配置模板
 templates = Jinja2Templates(directory="app/web/templates")
 
