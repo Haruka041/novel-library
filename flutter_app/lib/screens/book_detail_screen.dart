@@ -1,4 +1,3 @@
-import 'dart:html' as html;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../models/book.dart';
@@ -6,6 +5,10 @@ import '../services/book_service.dart';
 import '../services/api_client.dart';
 import '../services/api_config.dart';
 import '../services/storage_service.dart';
+
+// 条件导入以支持 Web
+import 'reader_screen_stub.dart'
+    if (dart.library.html) 'reader_screen_web.dart' as platform;
 
 class BookDetailScreen extends StatefulWidget {
   final int bookId;
@@ -118,8 +121,8 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
 
   void _downloadBook() {
     final downloadUrl = '${ApiConfig.baseUrl}/books/${widget.bookId}/download';
-    // 使用 dart:html 在新窗口打开下载链接
-    html.window.open(downloadUrl, '_blank');
+    // 使用条件导入的平台实现
+    platform.openUrl(downloadUrl);
     
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
