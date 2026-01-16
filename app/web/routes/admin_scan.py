@@ -85,6 +85,8 @@ async def add_library_path(
     """
     为书库添加新路径
     """
+    from pathlib import Path
+    
     # 验证书库存在
     result = await db.execute(
         select(Library).where(Library.id == library_id)
@@ -94,29 +96,47 @@ async def add_library_path(
     if not library:
         raise HTTPException(status_code=404, detail="书库不存在")
     
+    # 路径规范化（不强制要求路径存在，因为可能在远程挂载等情况）
+    path_str = path_data.path.strip()
+    
+    # 基本验证
+    if not path_str:
+        raise HTTPException(status_code=400, detail="路径不能为空")
+    
+    if len(path_str) > 500:
+        raise HTTPException(status_code=400, detail="路径长度不能超过500个字符")
+    
+    log.info(f"尝试添加路径: '{path_str}' (长度: {len(path_str)})")
+    
     # 检查路径是否已存在
     existing = await db.execute(
         select(LibraryPath)
         .where(LibraryPath.library_id == library_id)
-        .where(LibraryPath.path == path_data.path)
+        .where(LibraryPath.path == path_str)
     )
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="路径已存在")
     
     # 创建新路径
-    lib_path = LibraryPath(
-        library_id=library_id,
-        path=path_data.path,
-        enabled=True
-    )
-    
-    db.add(lib_path)
-    await db.commit()
-    await db.refresh(lib_path)
-    
-    log.info(f"管理员 {current_user.username} 为书库 {library.name} 添加了路径: {path_data.path}")
-    
-    return lib_path
+    try:
+        lib_path = LibraryPath(
+            library_id=library_id,
+            path=path_str,
+            enabled=True
+        )
+        
+        db.add(lib_path)
+        await db.commit()
+        await db.refresh(lib_path)
+        
+        log.info(f"管理员 {current_user.username} 为书库 {library.name} 成功添加路径: {path_str}")
+        
+        return lib_path
+        
+    except Exception as e:
+        await db.rollback()
+        log.error(f"添加路径失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"添加路径失败: {str(e)}")
 
 
 @router.get("/admin/libraries/{library_id}/paths", response_model=List[PathResponse])
