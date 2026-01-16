@@ -1485,10 +1485,12 @@ async def auto_tag_books(
     from pathlib import Path
     from sqlalchemy.orm import selectinload
     
+    from app.models import Tag
+    
     try:
-        # 构建查询 - 预加载book_tags和author关系
+        # 构建查询 - 预加载tags和author关系
         query = select(Book).options(
-            selectinload(Book.book_tags).selectinload(BookTag.tag),
+            selectinload(Book.tags),
             selectinload(Book.author)
         )
         
@@ -1557,6 +1559,9 @@ async def auto_tag_books(
                 # 去重
                 auto_tags = list(set(auto_tags))
                 
+                # 即使没有匹配到标签，也算处理过
+                processed_count += 1
+                
                 if auto_tags:
                     # 获取或创建标签
                     existing_tag_names = {t.name for t in book.tags}
@@ -1570,20 +1575,18 @@ async def auto_tag_books(
                             tag = tag_result.scalar_one_or_none()
                             
                             if not tag:
-                                tag = Tag(name=tag_name, type="custom")
+                                tag = Tag(name=tag_name, type="auto")
                                 db.add(tag)
                                 await db.flush()
                             
                             if tag not in book.tags:
                                 book.tags.append(tag)
                                 tagged_count += 1
-                    
-                    processed_count += 1
-                    
-                    # 每处理100本书提交一次
-                    if processed_count % 100 == 0:
-                        await db.commit()
-                        log.debug(f"已处理 {processed_count} 本书")
+                
+                # 每处理100本书提交一次
+                if processed_count % 100 == 0:
+                    await db.commit()
+                    log.debug(f"已处理 {processed_count} 本书")
                 
             except Exception as e:
                 log.error(f"处理书籍 {book.id} 失败: {e}")
