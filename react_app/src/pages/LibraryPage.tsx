@@ -19,6 +19,14 @@ interface BookResponse {
   added_at: string
 }
 
+interface BooksApiResponse {
+  books: BookResponse[]
+  total: number
+  page: number
+  limit: number
+  total_pages: number
+}
+
 export default function LibraryPage() {
   const { libraryId } = useParams()
   const navigate = useNavigate()
@@ -34,6 +42,7 @@ export default function LibraryPage() {
   const [sortBy, setSortBy] = useState('added_at')
   const [page, setPage] = useState(1)
   const [hasMore, setHasMore] = useState(true)
+  const [totalCount, setTotalCount] = useState(0)
   const [sizeMenuAnchor, setSizeMenuAnchor] = useState<null | HTMLElement>(null)
   const observerTarget = useRef<HTMLDivElement>(null)
 
@@ -77,10 +86,10 @@ export default function LibraryPage() {
         url += `&library_id=${selectedLibrary}`
       }
       
-      const response = await api.get<BookResponse[]>(url)
+      const response = await api.get<BooksApiResponse>(url)
       
       // 转换为 BookSummary 格式
-      const bookSummaries: BookSummary[] = response.data.map((book) => ({
+      const bookSummaries: BookSummary[] = response.data.books.map((book) => ({
         id: book.id,
         title: book.title,
         author_name: book.author_name,
@@ -96,8 +105,9 @@ export default function LibraryPage() {
         setBooks(bookSummaries)
       }
       
-      // 如果返回的数据少于 limit，说明没有更多了
-      setHasMore(bookSummaries.length >= limit)
+      // 更新总数和分页状态
+      setTotalCount(response.data.total)
+      setHasMore(pageNum < response.data.total_pages)
     } catch (err) {
       console.error('加载书籍失败:', err)
       setError('加载失败，请刷新重试')
@@ -270,10 +280,18 @@ export default function LibraryPage() {
       {/* 统计信息 */}
       <Box sx={{ mb: 3, display: 'flex', gap: 1 }}>
         <Chip
-          label={`共 ${books.length}${hasMore ? '+' : ''} 本书`}
+          label={totalCount > 0 ? `共 ${totalCount} 本书` : `共 ${books.length} 本书`}
           variant="outlined"
           size="small"
         />
+        {books.length > 0 && books.length < totalCount && (
+          <Chip
+            label={`已加载 ${books.length}`}
+            size="small"
+            color="primary"
+            variant="outlined"
+          />
+        )}
         {loadingMore && (
           <Chip
             label="加载中..."

@@ -273,7 +273,7 @@ async def delete_library(
 
 # ===== 书籍管理 =====
 
-@router.get("/books", response_model=List[BookResponse])
+@router.get("/books")
 async def list_books(
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=100),
@@ -282,12 +282,18 @@ async def list_books(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取用户有权访问的书籍列表"""
+    """获取用户有权访问的书籍列表，返回分页数据和总数"""
     # 获取用户可访问的书库ID列表
     accessible_library_ids = await get_accessible_library_ids(current_user, db)
     
     if not accessible_library_ids:
-        return []
+        return {
+            "books": [],
+            "total": 0,
+            "page": page,
+            "limit": limit,
+            "total_pages": 0
+        }
     
     # 构建查询，只包含可访问书库的书籍，并加载主版本
     query = select(Book).options(
@@ -303,7 +309,13 @@ async def list_books(
     if library_id:
         # 确保请求的书库在可访问列表中
         if library_id not in accessible_library_ids:
-            return []
+            return {
+                "books": [],
+                "total": 0,
+                "page": page,
+                "limit": limit,
+                "total_pages": 0
+            }
         query = query.where(Book.library_id == library_id)
     
     query = query.order_by(Book.added_at.desc())
@@ -318,14 +330,15 @@ async def list_books(
         if await check_book_access(current_user, book.id, db):
             filtered_books.append(book)
     
-    # 分页
-    total_filtered = len(filtered_books)
+    # 计算总数和分页
+    total_count = len(filtered_books)
+    total_pages = (total_count + limit - 1) // limit if total_count > 0 else 0
     start_idx = (page - 1) * limit
     end_idx = start_idx + limit
     paginated_books = filtered_books[start_idx:end_idx]
     
     # 手动构建响应
-    response = []
+    books_data = []
     for book in paginated_books:
         # 获取主版本或第一个版本
         primary_version = None
@@ -334,7 +347,7 @@ async def list_books(
             if not primary_version:
                 primary_version = book.versions[0] if book.versions else None
         
-        response.append({
+        books_data.append({
             "id": book.id,
             "title": book.title,
             "author_name": book.author.name if book.author else None,
@@ -343,7 +356,13 @@ async def list_books(
             "added_at": book.added_at.isoformat(),
         })
     
-    return response
+    return {
+        "books": books_data,
+        "total": total_count,
+        "page": page,
+        "limit": limit,
+        "total_pages": total_pages
+    }
 
 
 @router.get("/books/{book_id}")
