@@ -25,13 +25,30 @@
 
   <script>
     // The value below is injected by flutter build, do not touch.
-    const serviceWorkerVersion = "1131800258";
+    const serviceWorkerVersion = "3517391724";
   </script>
   <!-- This script adds the flutter initialization JS code -->
-  <script src="flutter.js" defer></script>
+  <!-- 强制版本控制 -->
+  <script src="flutter.js?v=20260116" defer></script>
 </head>
 <body>
   <script>
+    // 版本号 - 更新此值强制刷新
+    var APP_VERSION = '20260116-2';
+    
+    // 检查版本，如果变化则清除缓存
+    var storedVersion = localStorage.getItem('app_version');
+    if (storedVersion !== APP_VERSION) {
+      console.log('版本更新，清除缓存...');
+      localStorage.setItem('app_version', APP_VERSION);
+      // 清除所有缓存
+      if ('caches' in window) {
+        caches.keys().then(function(names) {
+          for (let name of names) caches.delete(name);
+        });
+      }
+    }
+    
     window.addEventListener('load', function(ev) {
       // 注销旧的 Service Worker 以确保加载最新代码
       if ('serviceWorker' in navigator) {
