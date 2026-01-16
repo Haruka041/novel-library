@@ -16,7 +16,8 @@ from app.core.extractor import Extractor
 from app.core.metadata.epub_parser import EpubParser
 from app.core.metadata.mobi_parser import MobiParser
 from app.core.metadata.txt_parser import TxtParser
-from app.models import Author, Book, BookVersion, Library
+from app.core.tag_keywords import get_tags_from_filename, get_tags_from_content
+from app.models import Author, Book, BookVersion, Library, Tag
 from app.utils.file_hash import calculate_file_hash
 from app.utils.logger import log
 
@@ -172,6 +173,40 @@ class Scanner:
             stats["skipped"] += 1
             return
         
+        # 智能提取简介（仅TXT，且没有简介时）
+        if file_path.suffix.lower() == '.txt' and not metadata.get('description'):
+            try:
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read(5000)  # 只读前5000字用于提取
+                    description = self.txt_parser.extract_description(content)
+                    if description:
+                        metadata['description'] = description
+                        log.debug(f"提取到简介: {len(description)}字")
+            except Exception as e:
+                log.error(f"提取简介失败: {file_path}, 错误: {e}")
+        
+        # 自动提取标签
+        auto_tags = []
+        try:
+            # 从文件名提取
+            auto_tags.extend(get_tags_from_filename(file_path.name))
+            
+            # 从内容提取（仅TXT）
+            if file_path.suffix.lower() == '.txt':
+                try:
+                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read(1000)  # 只读前1000字
+                        auto_tags.extend(get_tags_from_content(content))
+                except Exception as e:
+                    log.error(f"从内容提取标签失败: {e}")
+            
+            auto_tags = list(set(auto_tags))  # 去重
+            if auto_tags:
+                metadata['auto_tags'] = auto_tags
+                log.debug(f"自动提取标签: {auto_tags}")
+        except Exception as e:
+            log.error(f"提取标签失败: {file_path}, 错误: {e}")
+        
         # 去重检测（支持版本管理）
         action, book_id, reason = await self.deduplicator.check_duplicate(
             file_path,
@@ -244,6 +279,14 @@ class Scanner:
         
         self.db.add(book)
         await self.db.flush()  # 获取book.id但不提交
+        
+        # 自动添加标签
+        if metadata.get('auto_tags'):
+            for tag_name in metadata['auto_tags']:
+                tag = await self._get_or_create_tag(tag_name)
+                if tag not in book.tags:
+                    book.tags.append(tag)
+            log.debug(f"为书籍添加标签: {metadata['auto_tags']}")
         
         # 创建主版本 - 使用 as_posix() 确保路径格式一致
         file_hash = calculate_file_hash(file_path, settings.deduplicator.hash_algorithm)
@@ -363,3 +406,29 @@ class Scanner:
         await self.db.refresh(author)
         
         return author.id
+    
+    async def _get_or_create_tag(self, tag_name: str) -> Tag:
+        """
+        获取或创建标签
+        
+        Args:
+            tag_name: 标签名
+            
+        Returns:
+            Tag对象
+        """
+        # 查找标签
+        result = await self.db.execute(
+            select(Tag).where(Tag.name == tag_name)
+        )
+        tag = result.scalar_one_or_none()
+        
+        if tag:
+            return tag
+        
+        # 创建新标签
+        tag = Tag(name=tag_name)
+        self.db.add(tag)
+        await self.db.flush()  # 获取ID但不提交
+        
+        return tag
