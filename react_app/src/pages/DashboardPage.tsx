@@ -71,56 +71,88 @@ export default function DashboardPage() {
         </Alert>
       )}
 
-      {/* 统计卡片 */}
-      <Grid container spacing={2} sx={{ mb: 4 }}>
+      {/* 统计卡片 - 移动端优化 */}
+      <Grid container spacing={1.5} sx={{ mb: 4 }}>
         <Grid item xs={6} md={3}>
           <Card sx={{ bgcolor: 'primary.main', color: 'white' }}>
-            <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              <MenuBook sx={{ fontSize: 40 }} />
-              <Box>
-                <Typography variant="h4" fontWeight="bold">
+            <CardContent sx={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: { xs: 1, sm: 2 },
+              p: { xs: 1.5, sm: 2 },
+              '&:last-child': { pb: { xs: 1.5, sm: 2 } }
+            }}>
+              <MenuBook sx={{ fontSize: { xs: 28, sm: 40 } }} />
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="h5" fontWeight="bold" sx={{ fontSize: { xs: '1.25rem', sm: '1.5rem' } }}>
                   {loading ? '-' : totalBooks}
                 </Typography>
-                <Typography variant="body2" sx={{ opacity: 0.9 }}>书籍总数</Typography>
+                <Typography variant="caption" sx={{ opacity: 0.9, fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
+                  书籍总数
+                </Typography>
               </Box>
             </CardContent>
           </Card>
         </Grid>
         <Grid item xs={6} md={3}>
           <Card sx={{ bgcolor: 'secondary.main', color: 'white' }}>
-            <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              <LibraryBooks sx={{ fontSize: 40 }} />
-              <Box>
-                <Typography variant="h4" fontWeight="bold">
+            <CardContent sx={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: { xs: 1, sm: 2 },
+              p: { xs: 1.5, sm: 2 },
+              '&:last-child': { pb: { xs: 1.5, sm: 2 } }
+            }}>
+              <LibraryBooks sx={{ fontSize: { xs: 28, sm: 40 } }} />
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="h5" fontWeight="bold" sx={{ fontSize: { xs: '1.25rem', sm: '1.5rem' } }}>
                   {loading ? '-' : totalLibraries}
                 </Typography>
-                <Typography variant="body2" sx={{ opacity: 0.9 }}>书库数</Typography>
+                <Typography variant="caption" sx={{ opacity: 0.9, fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
+                  书库数
+                </Typography>
               </Box>
             </CardContent>
           </Card>
         </Grid>
         <Grid item xs={6} md={3}>
           <Card sx={{ bgcolor: 'success.main', color: 'white' }}>
-            <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              <MenuBook sx={{ fontSize: 40 }} />
-              <Box>
-                <Typography variant="h4" fontWeight="bold">
+            <CardContent sx={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: { xs: 1, sm: 2 },
+              p: { xs: 1.5, sm: 2 },
+              '&:last-child': { pb: { xs: 1.5, sm: 2 } }
+            }}>
+              <MenuBook sx={{ fontSize: { xs: 28, sm: 40 } }} />
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="h5" fontWeight="bold" sx={{ fontSize: { xs: '1.25rem', sm: '1.5rem' } }}>
                   {loading ? '-' : readingCount}
                 </Typography>
-                <Typography variant="body2" sx={{ opacity: 0.9 }}>正在阅读</Typography>
+                <Typography variant="caption" sx={{ opacity: 0.9, fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
+                  正在阅读
+                </Typography>
               </Box>
             </CardContent>
           </Card>
         </Grid>
         <Grid item xs={6} md={3}>
           <Card sx={{ bgcolor: 'error.main', color: 'white' }}>
-            <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              <Favorite sx={{ fontSize: 40 }} />
-              <Box>
-                <Typography variant="h4" fontWeight="bold">
+            <CardContent sx={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: { xs: 1, sm: 2 },
+              p: { xs: 1.5, sm: 2 },
+              '&:last-child': { pb: { xs: 1.5, sm: 2 } }
+            }}>
+              <Favorite sx={{ fontSize: { xs: 28, sm: 40 } }} />
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="h5" fontWeight="bold" sx={{ fontSize: { xs: '1.25rem', sm: '1.5rem' } }}>
                   {loading ? '-' : favoritesCount}
                 </Typography>
-                <Typography variant="body2" sx={{ opacity: 0.9 }}>收藏数</Typography>
+                <Typography variant="caption" sx={{ opacity: 0.9, fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
+                  收藏数
+                </Typography>
               </Box>
             </CardContent>
           </Card>

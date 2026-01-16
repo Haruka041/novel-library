@@ -115,20 +115,22 @@ export default function ContinueReadingCard({ item, loading = false }: ContinueR
           {item.library_name}
         </Typography>
 
-        <Box sx={{ mt: 'auto' }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-            <Typography variant="caption" color="text.secondary">
+        <Box sx={{ mt: 'auto', minWidth: 0 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
               阅读进度
             </Typography>
-            <Typography variant="caption" color="primary">
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <LinearProgress
+                variant="determinate"
+                value={progressPercent}
+                sx={{ height: 4, borderRadius: 2 }}
+              />
+            </Box>
+            <Typography variant="caption" color="primary" fontWeight="medium" sx={{ flexShrink: 0 }}>
               {progressPercent}%
             </Typography>
           </Box>
-          <LinearProgress
-            variant="determinate"
-            value={progressPercent}
-            sx={{ height: 4, borderRadius: 2 }}
-          />
         </Box>
       </CardContent>
     </Card>
