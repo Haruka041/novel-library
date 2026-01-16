@@ -39,7 +39,6 @@ class UserResponse(BaseModel):
     """用户响应模型"""
     id: int
     username: str
-    email: Optional[str] = None
     is_admin: bool
     age_rating_limit: str = "all"
     telegram_id: Optional[str] = None
@@ -168,7 +167,6 @@ async def login_json(
         "user": {
             "id": user.id,
             "username": user.username,
-            "email": user.email,
             "is_admin": user.is_admin,
         }
     }
