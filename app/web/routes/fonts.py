@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.security import get_current_user
+from app.web.routes.dependencies import get_current_user
 from app.models import User
 
 router = APIRouter(prefix="/api/fonts", tags=["fonts"])
