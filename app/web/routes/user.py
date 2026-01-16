@@ -405,6 +405,70 @@ async def get_book_personal_tags(
     }
 
 
+# ===== 阅读历史 =====
+
+@router.get("/reading-history")
+async def get_reading_history(
+    page: int = 1,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    获取阅读历史记录（按最后阅读时间倒序）
+    
+    Args:
+        page: 页码
+        limit: 每页数量
+        db: 数据库会话
+        current_user: 当前用户
+        
+    Returns:
+        阅读历史列表
+    """
+    from app.models import ReadingProgress, Author
+    
+    # 查询阅读进度，按最后阅读时间倒序
+    query = (
+        select(ReadingProgress, Book)
+        .join(Book, ReadingProgress.book_id == Book.id)
+        .options(joinedload(Book.author))
+        .where(ReadingProgress.user_id == current_user.id)
+        .order_by(ReadingProgress.last_read_at.desc())
+    )
+    
+    # 获取所有记录
+    result = await db.execute(query)
+    all_records = result.all()
+    
+    # 分页
+    total = len(all_records)
+    total_pages = (total + limit - 1) // limit if total > 0 else 0
+    start = (page - 1) * limit
+    end = start + limit
+    paginated_records = all_records[start:end]
+    
+    # 构建响应
+    history = []
+    for progress, book in paginated_records:
+        history.append({
+            "book_id": book.id,
+            "book_title": book.title,
+            "author_name": book.author.name if book.author else None,
+            "progress": progress.progress,
+            "finished": progress.finished,
+            "last_read_at": progress.last_read_at.isoformat()
+        })
+    
+    return {
+        "history": history,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "total_pages": total_pages
+    }
+
+
 # ===== 用户设置 =====
 
 @router.get("/settings")
