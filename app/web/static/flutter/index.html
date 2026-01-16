@@ -25,7 +25,7 @@
 
   <script>
     // The value below is injected by flutter build, do not touch.
-    const serviceWorkerVersion = "2285915063";
+    const serviceWorkerVersion = "1131800258";
   </script>
   <!-- This script adds the flutter initialization JS code -->
   <script src="flutter.js" defer></script>
@@ -33,11 +33,19 @@
 <body>
   <script>
     window.addEventListener('load', function(ev) {
-      // Download main.dart.js
+      // 注销旧的 Service Worker 以确保加载最新代码
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(function(registrations) {
+          for(let registration of registrations) {
+            registration.unregister();
+            console.log('Service Worker unregistered');
+          }
+        });
+      }
+      
+      // Download main.dart.js - 禁用 Service Worker 缓存
       _flutter.loader.loadEntrypoint({
-        serviceWorker: {
-          serviceWorkerVersion: serviceWorkerVersion,
-        },
+        // 不使用 serviceWorker，直接加载
         onEntrypointLoaded: function(engineInitializer) {
           engineInitializer.initializeEngine().then(function(appRunner) {
             appRunner.runApp();
