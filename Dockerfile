@@ -6,10 +6,10 @@ FROM node:18-alpine AS react-builder
 WORKDIR /app/react_app
 
 # 复制 React 项目文件
-COPY react_app/package*.json ./
+COPY react_app/package.json ./
 
-# 安装依赖
-RUN npm ci --registry=https://registry.npmmirror.com || npm ci
+# 安装依赖（使用 npm install 因为没有 package-lock.json）
+RUN npm install --registry=https://registry.npmmirror.com || npm install
 
 # 复制源代码
 COPY react_app/ ./
