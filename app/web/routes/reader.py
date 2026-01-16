@@ -23,28 +23,43 @@ router = APIRouter()
 @router.get("/books/{book_id}/content")
 async def get_book_content(
     book: Book = Depends(get_accessible_book),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
     获取书籍内容（用于在线阅读）
     需要有书籍访问权限
     """
+    from sqlalchemy.orm import selectinload
     
-    file_path = Path(book.file_path)
+    # 加载书籍版本
+    await db.refresh(book, ['versions'])
+    
+    # 获取主版本
+    primary_version = None
+    if book.versions:
+        primary_version = next((v for v in book.versions if v.is_primary), None)
+        if not primary_version:
+            primary_version = book.versions[0] if book.versions else None
+    
+    if not primary_version:
+        raise HTTPException(status_code=404, detail="书籍没有可用的文件版本")
+    
+    file_path = Path(primary_version.file_path)
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="文件不存在")
     
     # 根据文件格式返回内容
-    file_format = book.file_format.lower()
+    file_format = primary_version.file_format.lower()
     
-    if file_format == '.txt':
+    if file_format == 'txt' or file_format == '.txt':
         return await _read_txt_content(file_path)
-    elif file_format == '.epub':
+    elif file_format == 'epub' or file_format == '.epub':
         # EPUB 文件直接返回，由前端 epub.js 处理
         return FileResponse(
             file_path,
             media_type="application/epub+zip",
-            filename=book.file_name
+            filename=primary_version.file_name
         )
     else:
         raise HTTPException(
@@ -102,9 +117,10 @@ async def download_book(
     1. Authorization Header (优先)
     2. URL 参数 ?token=xxx (用于浏览器直接下载)
     """
-    from fastapi import Request
+    from sqlalchemy.orm import selectinload
     from app.web.routes.auth import decode_token
     from app.utils.permissions import check_book_access
+    from app.models import BookVersion
     
     # 获取 token - 优先从 URL 参数获取
     if not token:
@@ -128,9 +144,9 @@ async def download_book(
     if not current_user:
         raise HTTPException(status_code=401, detail="用户不存在")
     
-    # 获取书籍
+    # 获取书籍（带版本）
     result = await db.execute(
-        select(Book).where(Book.id == book_id)
+        select(Book).options(selectinload(Book.versions)).where(Book.id == book_id)
     )
     book = result.scalar_one_or_none()
     
@@ -141,14 +157,24 @@ async def download_book(
     if not await check_book_access(current_user, book_id, db):
         raise HTTPException(status_code=403, detail="无权访问此书籍")
     
-    file_path = Path(book.file_path)
+    # 获取主版本
+    primary_version = None
+    if book.versions:
+        primary_version = next((v for v in book.versions if v.is_primary), None)
+        if not primary_version:
+            primary_version = book.versions[0] if book.versions else None
+    
+    if not primary_version:
+        raise HTTPException(status_code=404, detail="书籍没有可用的文件版本")
+    
+    file_path = Path(primary_version.file_path)
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="文件不存在")
     
     # 返回文件
     return FileResponse(
         file_path,
-        filename=book.file_name,
+        filename=primary_version.file_name,
         media_type="application/octet-stream"
     )
 
