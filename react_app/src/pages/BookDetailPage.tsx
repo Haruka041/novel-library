@@ -107,7 +107,7 @@ export default function BookDetailPage() {
         <Grid item xs={12} md={4} lg={3}>
           <Card
             sx={{
-              maxWidth: { xs: '100%', sm: 400, md: 300 },
+              maxWidth: { xs: 280, sm: 320, md: 240 },
               mx: 'auto',
             }}
           >

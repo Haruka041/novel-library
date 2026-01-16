@@ -101,29 +101,33 @@ export default function BookCard({ book, loading = false, onClick }: BookCardPro
             {/* 大字符 */}
             <Typography
               sx={{
-                fontSize: '4rem',
+                fontSize: { xs: '5rem', sm: '6rem' },
                 fontWeight: 'bold',
                 color: 'white',
-                textShadow: '2px 2px 4px rgba(0,0,0,0.3)',
+                textShadow: '3px 3px 6px rgba(0,0,0,0.4)',
                 mb: 1,
+                fontFamily: '"Noto Sans SC", "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif',
+                lineHeight: 1,
               }}
             >
               {getFirstChar(book.title)}
             </Typography>
             {/* 书名 */}
             <Typography
-              variant="caption"
               sx={{
+                fontSize: { xs: '0.75rem', sm: '0.875rem' },
                 color: 'white',
                 textAlign: 'center',
-                textShadow: '1px 1px 2px rgba(0,0,0,0.5)',
+                textShadow: '2px 2px 4px rgba(0,0,0,0.6)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 display: '-webkit-box',
-                WebkitLineClamp: 3,
+                WebkitLineClamp: 2,
                 WebkitBoxOrient: 'vertical',
-                lineHeight: 1.2,
-                fontWeight: 500,
+                lineHeight: 1.3,
+                fontWeight: 600,
+                fontFamily: '"Noto Sans SC", "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif',
+                px: 1,
               }}
             >
               {book.title}
