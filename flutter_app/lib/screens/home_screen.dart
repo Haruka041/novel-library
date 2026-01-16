@@ -23,6 +23,9 @@ class _HomeScreenState extends State<HomeScreen> {
       final bookProvider = context.read<BookProvider>();
       if (bookProvider.books.isEmpty) {
         bookProvider.loadBooks();
+      } else {
+        // 已有书籍，只加载统计数据
+        bookProvider.loadStats();
       }
     });
   }
@@ -43,6 +46,16 @@ class _HomeScreenState extends State<HomeScreen> {
         context.go('/profile');
         break;
     }
+  }
+
+  // 根据屏幕宽度计算网格列数
+  int _getCrossAxisCount(double width) {
+    if (width < 400) return 2;       // 手机窄屏
+    if (width < 600) return 3;       // 手机横屏
+    if (width < 900) return 4;       // 平板
+    if (width < 1200) return 5;      // 小桌面
+    if (width < 1600) return 6;      // 中桌面
+    return 8;                        // 大桌面
   }
 
   @override
@@ -113,7 +126,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
             const SizedBox(height: 24),
 
-            // 统计卡片
+            // 统计卡片 - 使用真实数据
             Consumer<BookProvider>(
               builder: (context, bookProvider, _) => Row(
                 children: [
@@ -121,7 +134,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: _buildStatCard(
                       icon: Icons.library_books,
                       label: '总藏书',
-                      value: '${bookProvider.books.length}',
+                      value: '${bookProvider.totalBooks}',
                       color: Colors.blue,
                     ),
                   ),
@@ -171,7 +184,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
             const SizedBox(height: 12),
 
-            // 书籍预览
+            // 书籍预览 - 响应式布局
             Consumer<BookProvider>(
               builder: (context, bookProvider, _) {
                 if (bookProvider.isLoading && bookProvider.books.isEmpty) {
@@ -207,27 +220,32 @@ class _HomeScreenState extends State<HomeScreen> {
                   );
                 }
 
-                final recentBooks = bookProvider.books.take(6).toList();
+                return LayoutBuilder(
+                  builder: (context, constraints) {
+                    final crossAxisCount = _getCrossAxisCount(constraints.maxWidth);
+                    final recentBooks = bookProvider.books.take(crossAxisCount * 2).toList();
 
-                return GridView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
-                    childAspectRatio: 0.65,
-                    crossAxisSpacing: 8,
-                    mainAxisSpacing: 8,
-                  ),
-                  itemCount: recentBooks.length,
-                  itemBuilder: (context, index) {
-                    final book = recentBooks[index];
-                    final coverUrl = bookProvider.getCoverUrl(book.id);
+                    return GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: crossAxisCount,
+                        childAspectRatio: 0.65,
+                        crossAxisSpacing: 12,
+                        mainAxisSpacing: 12,
+                      ),
+                      itemCount: recentBooks.length,
+                      itemBuilder: (context, index) {
+                        final book = recentBooks[index];
+                        final coverUrl = bookProvider.getCoverUrl(book.id);
 
-                    return BookCard(
-                      book: book,
-                      coverUrl: coverUrl,
-                      onTap: () {
-                        context.push('/books/${book.id}');
+                        return BookCard(
+                          book: book,
+                          coverUrl: coverUrl,
+                          onTap: () {
+                            context.push('/books/${book.id}');
+                          },
+                        );
                       },
                     );
                   },

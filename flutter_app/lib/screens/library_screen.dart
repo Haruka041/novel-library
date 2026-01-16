@@ -38,6 +38,16 @@ class _LibraryScreenState extends State<LibraryScreen> {
     super.dispose();
   }
 
+  // 根据屏幕宽度计算网格列数
+  int _getCrossAxisCount(double width) {
+    if (width < 400) return 2;       // 手机窄屏
+    if (width < 600) return 3;       // 手机横屏
+    if (width < 900) return 4;       // 平板
+    if (width < 1200) return 5;      // 小桌面
+    if (width < 1600) return 6;      // 中桌面
+    return 8;                        // 大桌面
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -124,39 +134,45 @@ class _LibraryScreenState extends State<LibraryScreen> {
             );
           }
 
-          // 书籍网格
+          // 书籍网格 - 响应式
           return RefreshIndicator(
             onRefresh: () => bookProvider.refresh(),
-            child: GridView.builder(
-              controller: _scrollController,
-              padding: const EdgeInsets.all(8),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3,
-                childAspectRatio: 0.65,
-                crossAxisSpacing: 8,
-                mainAxisSpacing: 8,
-              ),
-              itemCount: bookProvider.books.length + 
-                         (bookProvider.isLoadingMore ? 1 : 0),
-              itemBuilder: (context, index) {
-                // 加载更多指示器
-                if (index == bookProvider.books.length) {
-                  return const Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(16.0),
-                      child: CircularProgressIndicator(),
-                    ),
-                  );
-                }
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final crossAxisCount = _getCrossAxisCount(constraints.maxWidth);
+                
+                return GridView.builder(
+                  controller: _scrollController,
+                  padding: const EdgeInsets.all(12),
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: crossAxisCount,
+                    childAspectRatio: 0.65,
+                    crossAxisSpacing: 12,
+                    mainAxisSpacing: 12,
+                  ),
+                  itemCount: bookProvider.books.length + 
+                             (bookProvider.isLoadingMore ? 1 : 0),
+                  itemBuilder: (context, index) {
+                    // 加载更多指示器
+                    if (index == bookProvider.books.length) {
+                      return const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(16.0),
+                          child: CircularProgressIndicator(),
+                        ),
+                      );
+                    }
 
-                final book = bookProvider.books[index];
-                final coverUrl = bookProvider.getCoverUrl(book.id);
+                    final book = bookProvider.books[index];
+                    final coverUrl = bookProvider.getCoverUrl(book.id);
 
-                return BookCard(
-                  book: book,
-                  coverUrl: coverUrl,
-                  onTap: () {
-                    context.push('/books/${book.id}');
+                    return BookCard(
+                      book: book,
+                      coverUrl: coverUrl,
+                      onTap: () {
+                        context.push('/books/${book.id}');
+                      },
+                    );
                   },
                 );
               },

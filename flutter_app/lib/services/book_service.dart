@@ -67,6 +67,33 @@ class BookService {
     }
   }
 
+  // 获取统计数据
+  Future<Map<String, int>> getStats() async {
+    debugPrint('📊 BookService.getStats');
+    
+    try {
+      final response = await _apiClient.get('/api/stats');
+      
+      if (response.statusCode == 200) {
+        final data = response.data as Map<String, dynamic>;
+        debugPrint('📊 BookService: Stats loaded - books: ${data['total_books']}, authors: ${data['total_authors']}');
+        return {
+          'total_books': data['total_books'] as int? ?? 0,
+          'total_authors': data['total_authors'] as int? ?? 0,
+          'total_libraries': data['total_libraries'] as int? ?? 0,
+        };
+      }
+    } catch (e) {
+      debugPrint('❌ BookService.getStats error: $e');
+    }
+    
+    return {
+      'total_books': 0,
+      'total_authors': 0,
+      'total_libraries': 0,
+    };
+  }
+
   // 搜索书籍
   Future<Map<String, dynamic>> searchBooks({
     required String query,

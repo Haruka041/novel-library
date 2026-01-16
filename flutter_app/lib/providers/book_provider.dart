@@ -12,6 +12,11 @@ class BookProvider extends ChangeNotifier {
   int _currentPage = 1;
   bool _hasMore = true;
   
+  // 统计数据
+  int _totalBooks = 0;
+  int _totalAuthors = 0;
+  int _totalLibraries = 0;
+  
   // 初始化状态
   bool _initialized = false;
   bool _initializing = false;
@@ -25,6 +30,11 @@ class BookProvider extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
   bool get hasMore => _hasMore;
   bool get isInitialized => _initialized;
+  
+  // 统计数据 Getters
+  int get totalBooks => _totalBooks;
+  int get totalAuthors => _totalAuthors;
+  int get totalLibraries => _totalLibraries;
 
   /// 确保服务已初始化
   Future<void> _ensureInitialized() async {
@@ -50,6 +60,24 @@ class BookProvider extends ChangeNotifier {
       rethrow;
     } finally {
       _initializing = false;
+    }
+  }
+
+  // 加载统计数据
+  Future<void> loadStats() async {
+    debugPrint('📊 loadStats called');
+    
+    await _ensureInitialized();
+    
+    try {
+      final stats = await _bookService!.getStats();
+      _totalBooks = stats['total_books'] ?? 0;
+      _totalAuthors = stats['total_authors'] ?? 0;
+      _totalLibraries = stats['total_libraries'] ?? 0;
+      debugPrint('📊 Stats loaded: books=$_totalBooks, authors=$_totalAuthors');
+      notifyListeners();
+    } catch (e) {
+      debugPrint('❌ Load stats error: $e');
     }
   }
 
@@ -88,6 +116,10 @@ class BookProvider extends ChangeNotifier {
       _hasMore = newBooks.length >= 20;
       _currentPage++;
       _isLoading = false;
+      
+      // 同时加载统计数据
+      loadStats();
+      
       notifyListeners();
     } catch (e) {
       debugPrint('❌ Load books error: $e');
