@@ -1481,12 +1481,16 @@ async def auto_tag_books(
     - reprocess: 是否重新处理已有标签的书籍（默认false）
     """
     from app.core.tag_keywords import get_tags_from_filename, get_tags_from_content
-    from app.models import Tag, BookVersion
+    from app.models import Tag, BookVersion, Author
     from pathlib import Path
+    from sqlalchemy.orm import selectinload
     
     try:
-        # 构建查询
-        query = select(Book)
+        # 构建查询 - 预加载tags和author关系
+        query = select(Book).options(
+            selectinload(Book.tags),
+            selectinload(Book.author)
+        )
         
         if request.library_id:
             # 验证书库存在
