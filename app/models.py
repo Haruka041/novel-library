@@ -325,9 +325,15 @@ class FilenamePattern(Base):
     description = Column(Text, nullable=True)  # 规则描述
     regex_pattern = Column(Text, nullable=False)  # 正则表达式模式
     
+    # 捕获组定义（指定哪个组对应哪个字段）
+    title_group = Column(Integer, default=1)  # 书名对应的捕获组（1-based）
+    author_group = Column(Integer, default=2)  # 作者对应的捕获组（0表示无此字段）
+    extra_group = Column(Integer, default=0)  # 额外信息对应的捕获组（如系列名、卷数等）
+    
     # 规则属性
     priority = Column(Integer, default=0, index=True)  # 优先级（数字越大优先级越高）
     is_active = Column(Boolean, default=True, index=True)  # 是否启用
+    library_id = Column(Integer, ForeignKey("libraries.id"), nullable=True)  # 关联书库（null表示全局规则）
     
     # 统计信息
     match_count = Column(Integer, default=0)  # 匹配次数

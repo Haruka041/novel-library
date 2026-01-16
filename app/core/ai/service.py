@@ -330,6 +330,162 @@ class AIService:
         return await self.chat([
             {"role": "user", "content": "请回复'连接成功'"}
         ], max_tokens=20)
+    
+    async def analyze_filename_patterns(self, filenames: List[str], sample_size: int = 50) -> Dict[str, Any]:
+        """
+        使用AI分析文件名模式，生成解析规则建议
+        
+        Args:
+            filenames: 文件名列表
+            sample_size: 采样数量（避免token过多）
+        
+        Returns:
+            分析结果，包含建议的正则表达式规则
+        """
+        if not self.config.is_enabled():
+            return {"success": False, "error": "AI功能未启用"}
+        
+        # 采样
+        import random
+        if len(filenames) > sample_size:
+            samples = random.sample(filenames, sample_size)
+        else:
+            samples = filenames
+        
+        # 构建文件名列表
+        filename_list = "\n".join([f"- {fn}" for fn in samples[:30]])  # 限制数量
+        
+        prompt = f"""请分析以下小说文件名，识别其命名模式并生成正则表达式解析规则。
+
+文件名示例（共{len(filenames)}个，采样{len(samples)}个）：
+{filename_list}
+
+请分析这些文件名的命名规则，识别书名、作者名、额外信息（如系列名、卷数等）的位置。
+
+返回JSON格式：
+{{
+    "patterns": [
+        {{
+            "name": "规则名称",
+            "description": "规则说明",
+            "regex": "正则表达式（使用捕获组）",
+            "title_group": 1,
+            "author_group": 2,
+            "extra_group": 0,
+            "examples": ["匹配的文件名示例"],
+            "confidence": 0.9
+        }}
+    ],
+    "analysis": "整体分析说明",
+    "common_separators": ["常见分隔符列表"],
+    "coverage_estimate": 0.8
+}}
+
+注意：
+1. 正则表达式需要兼容Python的re模块
+2. 捕获组从1开始编号，0表示该字段不存在
+3. 尽量覆盖所有命名模式
+4. 对于中文书名，注意《》「」『』等括号
+5. 常见模式如：
+   - 作者-书名.txt
+   - 【作者】书名.txt  
+   - 《书名》作者.txt
+   - 书名 BY作者.txt
+   - [系列名]书名-作者.txt
+
+返回纯JSON："""
+        
+        response = await self.chat([
+            {"role": "system", "content": "你是一个专业的文件名模式分析助手，擅长编写正则表达式。只返回JSON格式数据。"},
+            {"role": "user", "content": prompt}
+        ], max_tokens=2000)
+        
+        if not response.success:
+            return {"success": False, "error": response.error}
+        
+        try:
+            import json
+            content = response.content.strip()
+            # 提取JSON
+            if content.startswith('```'):
+                content = content.split('```')[1]
+                if content.startswith('json'):
+                    content = content[4:]
+            
+            result = json.loads(content)
+            result["success"] = True
+            return result
+        except Exception as e:
+            log.warning(f"解析AI响应失败: {e}")
+            return {"success": False, "error": f"解析响应失败: {str(e)}", "raw": response.content}
+    
+    async def suggest_pattern_for_filename(self, filename: str, existing_patterns: List[Dict] = None) -> Dict[str, Any]:
+        """
+        为单个文件名建议解析规则
+        
+        Args:
+            filename: 文件名
+            existing_patterns: 现有规则列表（用于避免重复）
+        
+        Returns:
+            建议结果
+        """
+        if not self.config.is_enabled():
+            return {"success": False, "error": "AI功能未启用"}
+        
+        existing_info = ""
+        if existing_patterns:
+            existing_info = "\n现有规则：\n" + "\n".join([f"- {p.get('name', '')}: {p.get('regex', '')}" for p in existing_patterns[:5]])
+        
+        prompt = f"""请为以下文件名生成解析规则：
+
+文件名: {filename}
+{existing_info}
+
+请识别并提取：
+1. 书名
+2. 作者名（如果有）
+3. 额外信息（如系列名、卷数、版本等）
+
+返回JSON格式：
+{{
+    "title": "提取的书名",
+    "author": "提取的作者名（无则null）",
+    "extra": "提取的额外信息（无则null）",
+    "pattern": {{
+        "name": "规则名称",
+        "regex": "正则表达式",
+        "title_group": 1,
+        "author_group": 2,
+        "extra_group": 0
+    }},
+    "confidence": 0.9
+}}
+
+返回纯JSON："""
+        
+        response = await self.chat([
+            {"role": "system", "content": "你是一个专业的文件名解析助手。只返回JSON格式数据。"},
+            {"role": "user", "content": prompt}
+        ], max_tokens=500)
+        
+        if not response.success:
+            return {"success": False, "error": response.error}
+        
+        try:
+            import json
+            content = response.content.strip()
+            if content.startswith('```'):
+                content = content.split('```')[1]
+                if content.startswith('json'):
+                    content = content[4:]
+            
+            result = json.loads(content)
+            result["success"] = True
+            return result
+        except Exception as e:
+            log.warning(f"解析AI响应失败: {e}")
+            return {"success": False, "error": f"解析响应失败: {str(e)}"}
 
 
 # 全局单例

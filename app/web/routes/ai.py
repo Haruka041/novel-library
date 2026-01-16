@@ -1,13 +1,20 @@
 """
 AI 配置 API 路由
 """
-from typing import Optional
+import re
+import json
+from typing import Optional, List
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from app.web.routes.admin import admin_required
+from app.web.routes.dependencies import get_db
 from app.core.ai.config import ai_config
 from app.core.ai.service import get_ai_service
+from app.models import FilenamePattern, Library, BookVersion
 
 
 router = APIRouter(prefix="/api/admin/ai", tags=["AI管理"])
@@ -167,3 +174,413 @@ async def get_models(provider: Optional[str] = None, admin = Depends(admin_requi
     if provider:
         return PRESET_MODELS.get(provider, [])
     return PRESET_MODELS
+
+
+# ================== 文件名规则管理 ==================
+
+class PatternCreate(BaseModel):
+    """创建文件名规则"""
+    name: str
+    regex_pattern: str
+    description: Optional[str] = None
+    title_group: int = 1
+    author_group: int = 2
+    extra_group: int = 0
+    priority: int = 0
+    library_id: Optional[int] = None
+    example_filename: Optional[str] = None
+
+
+class PatternUpdate(BaseModel):
+    """更新文件名规则"""
+    name: Optional[str] = None
+    regex_pattern: Optional[str] = None
+    description: Optional[str] = None
+    title_group: Optional[int] = None
+    author_group: Optional[int] = None
+    extra_group: Optional[int] = None
+    priority: Optional[int] = None
+    is_active: Optional[bool] = None
+    library_id: Optional[int] = None
+    example_filename: Optional[str] = None
+
+
+@router.get("/patterns")
+async def list_patterns(
+    library_id: Optional[int] = None,
+    active_only: bool = False,
+    db: Session = Depends(get_db),
+    admin = Depends(admin_required)
+):
+    """获取所有文件名规则"""
+    query = db.query(FilenamePattern)
+    
+    if library_id:
+        query = query.filter(
+            (FilenamePattern.library_id == library_id) | (FilenamePattern.library_id == None)
+        )
+    
+    if active_only:
+        query = query.filter(FilenamePattern.is_active == True)
+    
+    patterns = query.order_by(FilenamePattern.priority.desc()).all()
+    
+    return [{
+        "id": p.id,
+        "name": p.name,
+        "description": p.description,
+        "regex_pattern": p.regex_pattern,
+        "title_group": p.title_group,
+        "author_group": p.author_group,
+        "extra_group": p.extra_group,
+        "priority": p.priority,
+        "is_active": p.is_active,
+        "library_id": p.library_id,
+        "match_count": p.match_count,
+        "success_count": p.success_count,
+        "accuracy_rate": p.accuracy_rate,
+        "created_by": p.created_by,
+        "created_at": p.created_at.isoformat() if p.created_at else None,
+        "example_filename": p.example_filename,
+        "example_result": json.loads(p.example_result) if p.example_result else None
+    } for p in patterns]
+
+
+@router.post("/patterns")
+async def create_pattern(
+    data: PatternCreate,
+    db: Session = Depends(get_db),
+    admin = Depends(admin_required)
+):
+    """创建文件名规则"""
+    # 验证正则表达式
+    try:
+        compiled = re.compile(data.regex_pattern)
+        group_count = compiled.groups
+        if data.title_group > group_count or data.author_group > group_count:
+            raise HTTPException(400, f"正则表达式只有 {group_count} 个捕获组")
+    except re.error as e:
+        raise HTTPException(400, f"无效的正则表达式: {e}")
+    
+    # 如果有示例文件名，测试匹配
+    example_result = None
+    if data.example_filename:
+        match = compiled.match(data.example_filename)
+        if match:
+            groups = match.groups()
+            example_result = {
+                "title": groups[data.title_group - 1] if data.title_group > 0 and data.title_group <= len(groups) else None,
+                "author": groups[data.author_group - 1] if data.author_group > 0 and data.author_group <= len(groups) else None,
+                "extra": groups[data.extra_group - 1] if data.extra_group > 0 and data.extra_group <= len(groups) else None
+            }
+    
+    pattern = FilenamePattern(
+        name=data.name,
+        description=data.description,
+        regex_pattern=data.regex_pattern,
+        title_group=data.title_group,
+        author_group=data.author_group,
+        extra_group=data.extra_group,
+        priority=data.priority,
+        library_id=data.library_id,
+        example_filename=data.example_filename,
+        example_result=json.dumps(example_result, ensure_ascii=False) if example_result else None,
+        created_by='manual'
+    )
+    
+    db.add(pattern)
+    db.commit()
+    db.refresh(pattern)
+    
+    return {
+        "id": pattern.id,
+        "name": pattern.name,
+        "message": "规则创建成功",
+        "example_result": example_result
+    }
+
+
+@router.put("/patterns/{pattern_id}")
+async def update_pattern(
+    pattern_id: int,
+    data: PatternUpdate,
+    db: Session = Depends(get_db),
+    admin = Depends(admin_required)
+):
+    """更新文件名规则"""
+    pattern = db.query(FilenamePattern).filter(FilenamePattern.id == pattern_id).first()
+    if not pattern:
+        raise HTTPException(404, "规则不存在")
+    
+    # 验证新的正则表达式
+    if data.regex_pattern:
+        try:
+            compiled = re.compile(data.regex_pattern)
+            group_count = compiled.groups
+            title_group = data.title_group or pattern.title_group
+            author_group = data.author_group or pattern.author_group
+            if title_group > group_count or author_group > group_count:
+                raise HTTPException(400, f"正则表达式只有 {group_count} 个捕获组")
+        except re.error as e:
+            raise HTTPException(400, f"无效的正则表达式: {e}")
+    
+    # 更新字段
+    for key, value in data.dict().items():
+        if value is not None:
+            setattr(pattern, key, value)
+    
+    # 重新测试示例
+    if pattern.example_filename:
+        compiled = re.compile(pattern.regex_pattern)
+        match = compiled.match(pattern.example_filename)
+        if match:
+            groups = match.groups()
+            example_result = {
+                "title": groups[pattern.title_group - 1] if pattern.title_group > 0 and pattern.title_group <= len(groups) else None,
+                "author": groups[pattern.author_group - 1] if pattern.author_group > 0 and pattern.author_group <= len(groups) else None,
+                "extra": groups[pattern.extra_group - 1] if pattern.extra_group > 0 and pattern.extra_group <= len(groups) else None
+            }
+            pattern.example_result = json.dumps(example_result, ensure_ascii=False)
+    
+    db.commit()
+    
+    return {"message": "规则更新成功"}
+
+
+@router.delete("/patterns/{pattern_id}")
+async def delete_pattern(
+    pattern_id: int,
+    db: Session = Depends(get_db),
+    admin = Depends(admin_required)
+):
+    """删除文件名规则"""
+    pattern = db.query(FilenamePattern).filter(FilenamePattern.id == pattern_id).first()
+    if not pattern:
+        raise HTTPException(404, "规则不存在")
+    
+    db.delete(pattern)
+    db.commit()
+    
+    return {"message": "规则删除成功"}
+
+
+@router.post("/patterns/test")
+async def test_pattern(
+    regex_pattern: str,
+    filename: str,
+    title_group: int = 1,
+    author_group: int = 2,
+    extra_group: int = 0,
+    admin = Depends(admin_required)
+):
+    """测试正则表达式匹配"""
+    try:
+        compiled = re.compile(regex_pattern)
+    except re.error as e:
+        return {"success": False, "error": f"无效的正则表达式: {e}"}
+    
+    match = compiled.match(filename)
+    if not match:
+        return {"success": False, "error": "不匹配", "matched": False}
+    
+    groups = match.groups()
+    result = {
+        "success": True,
+        "matched": True,
+        "groups": groups,
+        "parsed": {
+            "title": groups[title_group - 1] if title_group > 0 and title_group <= len(groups) else None,
+            "author": groups[author_group - 1] if author_group > 0 and author_group <= len(groups) else None,
+            "extra": groups[extra_group - 1] if extra_group > 0 and extra_group <= len(groups) else None
+        }
+    }
+    
+    return result
+
+
+@router.post("/patterns/analyze-library/{library_id}")
+async def analyze_library_patterns(
+    library_id: int,
+    use_ai: bool = True,
+    db: Session = Depends(get_db),
+    admin = Depends(admin_required)
+):
+    """分析书库文件名模式"""
+    library = db.query(Library).filter(Library.id == library_id).first()
+    if not library:
+        raise HTTPException(404, "书库不存在")
+    
+    # 获取书库中的所有文件名
+    versions = db.query(BookVersion).join(
+        BookVersion.book
+    ).filter(
+        BookVersion.book.has(library_id=library_id)
+    ).all()
+    
+    if not versions:
+        return {"success": False, "error": "书库中没有书籍"}
+    
+    filenames = [v.file_name for v in versions]
+    
+    if use_ai and ai_config.is_enabled():
+        # 使用AI分析
+        service = get_ai_service()
+        result = await service.analyze_filename_patterns(filenames)
+        
+        if result.get("success"):
+            # 可选：自动创建规则
+            patterns_created = []
+            for pattern_data in result.get("patterns", []):
+                if pattern_data.get("confidence", 0) >= 0.7:
+                    # 检查规则是否已存在
+                    existing = db.query(FilenamePattern).filter(
+                        FilenamePattern.regex_pattern == pattern_data.get("regex")
+                    ).first()
+                    
+                    if not existing:
+                        pattern = FilenamePattern(
+                            name=pattern_data.get("name", "AI生成规则"),
+                            description=pattern_data.get("description"),
+                            regex_pattern=pattern_data.get("regex"),
+                            title_group=pattern_data.get("title_group", 1),
+                            author_group=pattern_data.get("author_group", 2),
+                            extra_group=pattern_data.get("extra_group", 0),
+                            library_id=library_id,
+                            created_by='ai',
+                            example_filename=pattern_data.get("examples", [None])[0]
+                        )
+                        db.add(pattern)
+                        patterns_created.append(pattern_data.get("name"))
+            
+            if patterns_created:
+                db.commit()
+            
+            result["patterns_created"] = patterns_created
+        
+        return result
+    else:
+        # 使用传统分析
+        from app.utils.filename_analyzer import FilenameAnalyzer
+        analyzer = FilenameAnalyzer()
+        result = analyzer.analyze_filenames(filenames)
+        result["ai_used"] = False
+        return result
+
+
+@router.post("/patterns/suggest")
+async def suggest_pattern_for_filename(
+    filename: str,
+    db: Session = Depends(get_db),
+    admin = Depends(admin_required)
+):
+    """为单个文件名建议规则"""
+    if not ai_config.is_enabled():
+        raise HTTPException(400, "AI功能未启用")
+    
+    # 获取现有规则
+    existing_patterns = db.query(FilenamePattern).filter(
+        FilenamePattern.is_active == True
+    ).order_by(FilenamePattern.priority.desc()).limit(5).all()
+    
+    existing = [{"name": p.name, "regex": p.regex_pattern} for p in existing_patterns]
+    
+    service = get_ai_service()
+    result = await service.suggest_pattern_for_filename(filename, existing)
+    
+    return result
+
+
+@router.post("/patterns/batch-apply")
+async def batch_apply_patterns(
+    library_id: int,
+    dry_run: bool = True,
+    db: Session = Depends(get_db),
+    admin = Depends(admin_required)
+):
+    """批量应用规则到书库（重新解析文件名）"""
+    library = db.query(Library).filter(Library.id == library_id).first()
+    if not library:
+        raise HTTPException(404, "书库不存在")
+    
+    # 获取规则
+    patterns = db.query(FilenamePattern).filter(
+        FilenamePattern.is_active == True,
+        (FilenamePattern.library_id == library_id) | (FilenamePattern.library_id == None)
+    ).order_by(FilenamePattern.priority.desc()).all()
+    
+    if not patterns:
+        return {"success": False, "error": "没有可用规则"}
+    
+    # 编译正则
+    compiled_patterns = []
+    for p in patterns:
+        try:
+            compiled_patterns.append({
+                "pattern": p,
+                "compiled": re.compile(p.regex_pattern)
+            })
+        except:
+            pass
+    
+    # 获取所有书籍版本
+    from app.models import Book
+    versions = db.query(BookVersion).join(
+        BookVersion.book
+    ).filter(
+        BookVersion.book.has(library_id=library_id)
+    ).all()
+    
+    results = {
+        "total": len(versions),
+        "matched": 0,
+        "updated": 0,
+        "details": []
+    }
+    
+    for version in versions:
+        filename = version.file_name
+        matched = False
+        
+        for cp in compiled_patterns:
+            match = cp["compiled"].match(filename)
+            if match:
+                matched = True
+                groups = match.groups()
+                p = cp["pattern"]
+                
+                parsed = {
+                    "title": groups[p.title_group - 1] if p.title_group > 0 and p.title_group <= len(groups) else None,
+                    "author": groups[p.author_group - 1] if p.author_group > 0 and p.author_group <= len(groups) else None,
+                }
+                
+                detail = {
+                    "filename": filename,
+                    "pattern_name": p.name,
+                    "parsed": parsed,
+                    "current_title": version.book.title,
+                    "current_author": version.book.author.name if version.book.author else None
+                }
+                
+                results["matched"] += 1
+                results["details"].append(detail)
+                
+                # 更新书籍（非dry_run模式）
+                if not dry_run and parsed["title"]:
+                    version.book.title = parsed["title"].strip()
+                    results["updated"] += 1
+                    
+                    # 更新规则匹配统计
+                    p.match_count = (p.match_count or 0) + 1
+                    p.success_count = (p.success_count or 0) + 1
+                
+                break
+    
+    if not dry_run:
+        db.commit()
+    
+    # 限制返回详情数量
+    if len(results["details"]) > 50:
+        results["details"] = results["details"][:50]
+        results["details_truncated"] = True
+    
+    return results
