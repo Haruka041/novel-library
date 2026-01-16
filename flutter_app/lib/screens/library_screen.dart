@@ -40,11 +40,39 @@ class _LibraryScreenState extends State<LibraryScreen> {
     });
 
     // 监听滚动，实现无限加载
-    _scrollController.addListener(() {
-      if (_selectedLibraryId != null &&
-          _scrollController.position.pixels >=
-          _scrollController.position.maxScrollExtent - 200) {
-        context.read<BookProvider>().loadMore();
+    _scrollController.addListener(_onScroll);
+  }
+
+  /// 滚动监听 - 检查是否需要加载更多
+  void _onScroll() {
+    if (_selectedLibraryId == null) return;
+    
+    final bookProvider = context.read<BookProvider>();
+    if (bookProvider.isLoadingMore || !bookProvider.hasMore) return;
+    
+    // 检查是否接近底部或内容不够滚动
+    final position = _scrollController.position;
+    final shouldLoad = position.pixels >= position.maxScrollExtent - 200 ||
+                       position.maxScrollExtent == 0; // 内容不够填满屏幕
+    
+    if (shouldLoad) {
+      bookProvider.loadMore();
+    }
+  }
+
+  /// 检查是否需要自动加载更多（当内容不够填满屏幕时）
+  void _checkAutoLoadMore() {
+    if (_selectedLibraryId == null) return;
+    
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) return;
+      
+      final bookProvider = context.read<BookProvider>();
+      if (bookProvider.isLoadingMore || !bookProvider.hasMore) return;
+      
+      // 如果没有滚动空间（内容不够），自动加载更多
+      if (_scrollController.position.maxScrollExtent < 100) {
+        bookProvider.loadMore();
       }
     });
   }
@@ -356,11 +384,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
             );
           }
 
+          // 内容渲染后检查是否需要自动加载更多
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _checkAutoLoadMore();
+          });
+
           // 书籍网格
           return RefreshIndicator(
             onRefresh: () => bookProvider.refresh(),
             child: GridView.builder(
               controller: _scrollController,
+              physics: const AlwaysScrollableScrollPhysics(), // 始终可滚动
               padding: Responsive.getPadding(context),
               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: Responsive.getGridCrossAxisCount(context),
