@@ -1,6 +1,8 @@
 import { Box, Card, CardContent, Typography, Skeleton, Chip } from '@mui/material'
 import { useNavigate } from 'react-router-dom'
+import { useState } from 'react'
 import { BookSummary } from '../types'
+import { useSettingsStore } from '../stores/settingsStore'
 
 interface BookCardProps {
   book?: BookSummary
@@ -8,8 +10,26 @@ interface BookCardProps {
   onClick?: () => void
 }
 
+// 生成颜色的哈希函数
+const stringToColor = (str: string): string => {
+  let hash = 0
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash)
+  }
+  const hue = hash % 360
+  return `hsl(${hue}, 45%, 50%)`
+}
+
+// 生成渐变封面
+const generateGradientCover = (title: string) => {
+  const color1 = stringToColor(title)
+  const color2 = stringToColor(title + 'salt')
+  return `linear-gradient(135deg, ${color1} 0%, ${color2} 100%)`
+}
+
 export default function BookCard({ book, loading = false, onClick }: BookCardProps) {
   const navigate = useNavigate()
+  const [imageError, setImageError] = useState(false)
 
   if (loading) {
     return (
@@ -33,6 +53,16 @@ export default function BookCard({ book, loading = false, onClick }: BookCardPro
     }
   }
 
+  const showFallback = !book.cover_url || imageError
+
+  // 获取书名首字作为封面文字
+  const getFirstChar = (title: string): string => {
+    if (!title) return '?'
+    // 优先取中文字符，否则取第一个字符
+    const match = title.match(/[\u4e00-\u9fa5]/)
+    return match ? match[0] : title[0].toUpperCase()
+  }
+
   return (
     <Card
       sx={{
@@ -51,11 +81,55 @@ export default function BookCard({ book, loading = false, onClick }: BookCardPro
         sx={{
           aspectRatio: '2/3',
           position: 'relative',
-          bgcolor: 'grey.800',
           overflow: 'hidden',
         }}
       >
-        {book.cover_url ? (
+        {showFallback ? (
+          // 渐变封面 + 文字
+          <Box
+            sx={{
+              width: '100%',
+              height: '100%',
+              background: generateGradientCover(book.title),
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 2,
+            }}
+          >
+            {/* 大字符 */}
+            <Typography
+              sx={{
+                fontSize: '4rem',
+                fontWeight: 'bold',
+                color: 'white',
+                textShadow: '2px 2px 4px rgba(0,0,0,0.3)',
+                mb: 1,
+              }}
+            >
+              {getFirstChar(book.title)}
+            </Typography>
+            {/* 书名 */}
+            <Typography
+              variant="caption"
+              sx={{
+                color: 'white',
+                textAlign: 'center',
+                textShadow: '1px 1px 2px rgba(0,0,0,0.5)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                display: '-webkit-box',
+                WebkitLineClamp: 3,
+                WebkitBoxOrient: 'vertical',
+                lineHeight: 1.2,
+                fontWeight: 500,
+              }}
+            >
+              {book.title}
+            </Typography>
+          </Box>
+        ) : (
           <Box
             component="img"
             src={`/api${book.cover_url}`}
@@ -65,25 +139,8 @@ export default function BookCard({ book, loading = false, onClick }: BookCardPro
               height: '100%',
               objectFit: 'cover',
             }}
-            onError={(e: React.SyntheticEvent<HTMLImageElement>) => {
-              e.currentTarget.style.display = 'none'
-            }}
+            onError={() => setImageError(true)}
           />
-        ) : (
-          <Box
-            sx={{
-              width: '100%',
-              height: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              bgcolor: 'grey.700',
-            }}
-          >
-            <Typography variant="h4" color="grey.500">
-              📖
-            </Typography>
-          </Box>
         )}
 
         {/* 新书标签 */}

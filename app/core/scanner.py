@@ -245,13 +245,13 @@ class Scanner:
         self.db.add(book)
         await self.db.flush()  # 获取book.id但不提交
         
-        # 创建主版本
+        # 创建主版本 - 使用 as_posix() 确保路径格式一致
         file_hash = calculate_file_hash(file_path, settings.deduplicator.hash_algorithm)
         quality = self._determine_quality(file_path)
         
         version = BookVersion(
             book_id=book.id,
-            file_path=str(file_path.absolute()),
+            file_path=str(file_path.absolute().as_posix()),
             file_name=file_path.name,
             file_format=file_path.suffix.lower(),
             file_size=file_path.stat().st_size,
@@ -284,10 +284,10 @@ class Scanner:
         )
         has_primary = result.scalar_one_or_none() is not None
         
-        # 创建新版本
+        # 创建新版本 - 使用 as_posix() 确保路径格式一致
         version = BookVersion(
             book_id=book_id,
-            file_path=str(file_path.absolute()),
+            file_path=str(file_path.absolute().as_posix()),
             file_name=file_path.name,
             file_format=file_path.suffix.lower(),
             file_size=file_path.stat().st_size,

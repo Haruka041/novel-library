@@ -104,8 +104,13 @@ export default function BookDetailPage() {
 
       <Grid container spacing={4}>
         {/* 封面 */}
-        <Grid item xs={12} md={4}>
-          <Card>
+        <Grid item xs={12} md={4} lg={3}>
+          <Card
+            sx={{
+              maxWidth: { xs: '100%', sm: 400, md: 300 },
+              mx: 'auto',
+            }}
+          >
             <Box
               sx={{
                 aspectRatio: '2/3',
@@ -135,7 +140,7 @@ export default function BookDetailPage() {
         </Grid>
 
         {/* 详情 */}
-        <Grid item xs={12} md={8}>
+        <Grid item xs={12} md={8} lg={9}>
           <Typography variant="h4" fontWeight="bold" gutterBottom>
             {book.title}
           </Typography>

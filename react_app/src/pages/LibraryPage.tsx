@@ -1,13 +1,14 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   Box, Typography, Grid, FormControl, InputLabel, Select, MenuItem,
-  ToggleButtonGroup, ToggleButton, CircularProgress, Alert, Chip
+  ToggleButtonGroup, ToggleButton, CircularProgress, Alert, Chip, Button, Menu
 } from '@mui/material'
-import { ViewModule, ViewList, Sort } from '@mui/icons-material'
+import { ViewModule, ViewList, PhotoSizeSelectLarge } from '@mui/icons-material'
 import api from '../services/api'
 import { BookSummary, LibrarySummary } from '../types'
 import BookCard from '../components/BookCard'
+import { useSettingsStore, CoverSize } from '../stores/settingsStore'
 
 interface BookResponse {
   id: number
@@ -21,14 +22,20 @@ interface BookResponse {
 export default function LibraryPage() {
   const { libraryId } = useParams()
   const navigate = useNavigate()
+  const { coverSize, setCoverSize } = useSettingsStore()
   
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState('')
   const [libraries, setLibraries] = useState<LibrarySummary[]>([])
   const [books, setBooks] = useState<BookSummary[]>([])
   const [selectedLibrary, setSelectedLibrary] = useState<number | ''>('')
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
   const [sortBy, setSortBy] = useState('added_at')
+  const [page, setPage] = useState(1)
+  const [hasMore, setHasMore] = useState(true)
+  const [sizeMenuAnchor, setSizeMenuAnchor] = useState<null | HTMLElement>(null)
+  const observerTarget = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     loadLibraries()
@@ -41,7 +48,9 @@ export default function LibraryPage() {
   }, [libraryId])
 
   useEffect(() => {
-    loadBooks()
+    setPage(1)
+    setHasMore(true)
+    loadBooks(1, false)
   }, [selectedLibrary])
 
   const loadLibraries = async () => {
@@ -53,12 +62,17 @@ export default function LibraryPage() {
     }
   }
 
-  const loadBooks = async () => {
+  const loadBooks = async (pageNum: number = 1, append: boolean = false) => {
     try {
-      setLoading(true)
+      if (append) {
+        setLoadingMore(true)
+      } else {
+        setLoading(true)
+      }
       setError('')
       
-      let url = '/api/books?limit=100'
+      const limit = 50
+      let url = `/api/books?page=${pageNum}&limit=${limit}`
       if (selectedLibrary) {
         url += `&library_id=${selectedLibrary}`
       }
@@ -76,14 +90,49 @@ export default function LibraryPage() {
         file_format: book.file_format,
       }))
       
-      setBooks(bookSummaries)
+      if (append) {
+        setBooks(prev => [...prev, ...bookSummaries])
+      } else {
+        setBooks(bookSummaries)
+      }
+      
+      // 如果返回的数据少于 limit，说明没有更多了
+      setHasMore(bookSummaries.length >= limit)
     } catch (err) {
       console.error('加载书籍失败:', err)
       setError('加载失败，请刷新重试')
     } finally {
       setLoading(false)
+      setLoadingMore(false)
     }
   }
+
+  // 加载更多
+  const loadMore = useCallback(() => {
+    if (!loadingMore && hasMore) {
+      const nextPage = page + 1
+      setPage(nextPage)
+      loadBooks(nextPage, true)
+    }
+  }, [page, loadingMore, hasMore])
+
+  // 无限滚动观察器
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !loading && !loadingMore) {
+          loadMore()
+        }
+      },
+      { threshold: 0.1 }
+    )
+    
+    if (observerTarget.current) {
+      observer.observe(observerTarget.current)
+    }
+    
+    return () => observer.disconnect()
+  }, [loadMore, hasMore, loading, loadingMore])
 
   const handleLibraryChange = (newLibraryId: number | '') => {
     setSelectedLibrary(newLibraryId)
@@ -106,6 +155,18 @@ export default function LibraryPage() {
         return new Date(b.added_at || 0).getTime() - new Date(a.added_at || 0).getTime()
     }
   })
+
+  // 根据封面尺寸计算网格列数
+  const getGridColumns = () => {
+    switch (coverSize) {
+      case 'small':
+        return { xs: 4, sm: 3, md: 2.4, lg: 2, xl: 1.5 }
+      case 'medium':
+        return { xs: 6, sm: 4, md: 3, lg: 2, xl: 2 }
+      case 'large':
+        return { xs: 6, sm: 4, md: 3, lg: 2.4, xl: 2 }
+    }
+  }
 
   const currentLibrary = libraries.find((lib) => lib.id === selectedLibrary)
 
@@ -148,6 +209,48 @@ export default function LibraryPage() {
           </Select>
         </FormControl>
 
+        {/* 封面尺寸 */}
+        <ToggleButton
+          value="size"
+          size="small"
+          onClick={(e) => setSizeMenuAnchor(e.currentTarget)}
+        >
+          <PhotoSizeSelectLarge />
+        </ToggleButton>
+        <Menu
+          anchorEl={sizeMenuAnchor}
+          open={Boolean(sizeMenuAnchor)}
+          onClose={() => setSizeMenuAnchor(null)}
+        >
+          <MenuItem
+            selected={coverSize === 'small'}
+            onClick={() => {
+              setCoverSize('small')
+              setSizeMenuAnchor(null)
+            }}
+          >
+            小
+          </MenuItem>
+          <MenuItem
+            selected={coverSize === 'medium'}
+            onClick={() => {
+              setCoverSize('medium')
+              setSizeMenuAnchor(null)
+            }}
+          >
+            中
+          </MenuItem>
+          <MenuItem
+            selected={coverSize === 'large'}
+            onClick={() => {
+              setCoverSize('large')
+              setSizeMenuAnchor(null)
+            }}
+          >
+            大
+          </MenuItem>
+        </Menu>
+
         {/* 视图切换 */}
         <ToggleButtonGroup
           value={viewMode}
@@ -165,12 +268,20 @@ export default function LibraryPage() {
       </Box>
 
       {/* 统计信息 */}
-      <Box sx={{ mb: 3 }}>
+      <Box sx={{ mb: 3, display: 'flex', gap: 1 }}>
         <Chip
-          label={`共 ${books.length} 本书`}
+          label={`共 ${books.length}${hasMore ? '+' : ''} 本书`}
           variant="outlined"
           size="small"
         />
+        {loadingMore && (
+          <Chip
+            label="加载中..."
+            size="small"
+            color="primary"
+            variant="outlined"
+          />
+        )}
       </Box>
 
       {/* 错误提示 */}
@@ -191,76 +302,104 @@ export default function LibraryPage() {
         </Box>
       ) : viewMode === 'grid' ? (
         /* 网格视图 */
-        <Grid container spacing={2}>
-          {sortedBooks.map((book) => (
-            <Grid item xs={6} sm={4} md={3} lg={2} key={book.id}>
-              <BookCard book={book} />
-            </Grid>
-          ))}
-        </Grid>
+        <>
+          <Grid container spacing={2}>
+            {sortedBooks.map((book) => (
+              <Grid item {...getGridColumns()} key={book.id}>
+                <BookCard book={book} />
+              </Grid>
+            ))}
+          </Grid>
+          {/* 无限滚动触发器 */}
+          <Box ref={observerTarget} sx={{ height: 20, mt: 4 }} />
+          {loadingMore && (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+              <CircularProgress size={32} />
+            </Box>
+          )}
+          {!hasMore && books.length > 0 && (
+            <Typography variant="body2" color="text.secondary" textAlign="center" sx={{ py: 4 }}>
+              已加载全部书籍
+            </Typography>
+          )}
+        </>
       ) : (
         /* 列表视图 */
-        <Box>
-          {sortedBooks.map((book) => (
-            <Box
-              key={book.id}
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 2,
-                p: 2,
-                borderBottom: 1,
-                borderColor: 'divider',
-                cursor: 'pointer',
-                '&:hover': { bgcolor: 'action.hover' },
-              }}
-              onClick={() => navigate(`/book/${book.id}`)}
-            >
-              {/* 封面缩略图 */}
+        <>
+          <Box>
+            {sortedBooks.map((book) => (
               <Box
+                key={book.id}
                 sx={{
-                  width: 48,
-                  height: 72,
-                  bgcolor: 'grey.800',
-                  borderRadius: 1,
-                  overflow: 'hidden',
-                  flexShrink: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 2,
+                  p: 2,
+                  borderBottom: 1,
+                  borderColor: 'divider',
+                  cursor: 'pointer',
+                  '&:hover': { bgcolor: 'action.hover' },
                 }}
+                onClick={() => navigate(`/book/${book.id}`)}
               >
-                {book.cover_url && (
-                  <Box
-                    component="img"
-                    src={`/api${book.cover_url}`}
-                    alt={book.title}
-                    sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                    onError={(e: React.SyntheticEvent<HTMLImageElement>) => {
-                      e.currentTarget.style.display = 'none'
-                    }}
+                {/* 封面缩略图 */}
+                <Box
+                  sx={{
+                    width: 48,
+                    height: 72,
+                    bgcolor: 'grey.800',
+                    borderRadius: 1,
+                    overflow: 'hidden',
+                    flexShrink: 0,
+                  }}
+                >
+                  {book.cover_url && (
+                    <Box
+                      component="img"
+                      src={`/api${book.cover_url}`}
+                      alt={book.title}
+                      sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      onError={(e: React.SyntheticEvent<HTMLImageElement>) => {
+                        e.currentTarget.style.display = 'none'
+                      }}
+                    />
+                  )}
+                </Box>
+
+                {/* 信息 */}
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Typography variant="body1" fontWeight="medium" noWrap>
+                    {book.title}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" noWrap>
+                    {book.author_name || '未知作者'}
+                  </Typography>
+                </Box>
+
+                {/* 格式标签 */}
+                {book.file_format && (
+                  <Chip
+                    label={book.file_format.toUpperCase()}
+                    size="small"
+                    sx={{ flexShrink: 0 }}
                   />
                 )}
               </Box>
-
-              {/* 信息 */}
-              <Box sx={{ flex: 1, minWidth: 0 }}>
-                <Typography variant="body1" fontWeight="medium" noWrap>
-                  {book.title}
-                </Typography>
-                <Typography variant="body2" color="text.secondary" noWrap>
-                  {book.author_name || '未知作者'}
-                </Typography>
-              </Box>
-
-              {/* 格式标签 */}
-              {book.file_format && (
-                <Chip
-                  label={book.file_format.toUpperCase()}
-                  size="small"
-                  sx={{ flexShrink: 0 }}
-                />
-              )}
+            ))}
+          </Box>
+          {/* 无限滚动触发器 */}
+          <Box ref={observerTarget} sx={{ height: 20, mt: 2 }} />
+          {loadingMore && (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+              <CircularProgress size={32} />
             </Box>
-          ))}
-        </Box>
+          )}
+          {!hasMore && books.length > 0 && (
+            <Typography variant="body2" color="text.secondary" textAlign="center" sx={{ py: 4 }}>
+              已加载全部书籍
+            </Typography>
+          )}
+        </>
       )}
     </Box>
   )

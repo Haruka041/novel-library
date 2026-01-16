@@ -40,7 +40,7 @@ class Library(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), nullable=False)
-    path = Column(String(500), unique=True, nullable=False)
+    path = Column(String(500), unique=True, nullable=True)  # 改为可空，向后兼容
     created_at = Column(DateTime, default=datetime.utcnow)
     last_scan = Column(DateTime, nullable=True)
     
@@ -51,6 +51,44 @@ class Library(Base):
     # 关系
     books = relationship("Book", back_populates="library", cascade="all, delete-orphan")
     permissions = relationship("LibraryPermission", back_populates="library", cascade="all, delete-orphan")
+    paths = relationship("LibraryPath", back_populates="library", cascade="all, delete-orphan")
+    scan_tasks = relationship("ScanTask", back_populates="library", cascade="all, delete-orphan")
+
+
+class LibraryPath(Base):
+    """书库路径表（支持多路径）"""
+    __tablename__ = "library_paths"
+
+    id = Column(Integer, primary_key=True, index=True)
+    library_id = Column(Integer, ForeignKey("libraries.id", ondelete="CASCADE"), nullable=False)
+    path = Column(String(500), nullable=False)
+    enabled = Column(Boolean, default=True)  # 是否启用
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # 关系
+    library = relationship("Library", back_populates="paths")
+
+
+class ScanTask(Base):
+    """扫描任务表"""
+    __tablename__ = "scan_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    library_id = Column(Integer, ForeignKey("libraries.id"), nullable=False)
+    status = Column(String(20), default='pending', index=True)  # pending, running, completed, failed, cancelled
+    progress = Column(Integer, default=0)  # 0-100
+    total_files = Column(Integer, default=0)
+    processed_files = Column(Integer, default=0)
+    added_books = Column(Integer, default=0)
+    skipped_books = Column(Integer, default=0)
+    error_count = Column(Integer, default=0)
+    error_message = Column(Text, nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    # 关系
+    library = relationship("Library", back_populates="scan_tasks")
 
 
 class LibraryPermission(Base):

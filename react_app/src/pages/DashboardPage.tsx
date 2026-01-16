@@ -7,10 +7,12 @@ import { DashboardResponse, LibrarySummary, ContinueReadingItem, LibraryLatest }
 import BookCard from '../components/BookCard'
 import ContinueReadingCard from '../components/ContinueReadingCard'
 import { useAuthStore } from '../stores/authStore'
+import { useSettingsStore } from '../stores/settingsStore'
 
 export default function DashboardPage() {
   const navigate = useNavigate()
   const user = useAuthStore((state) => state.user)
+  const { coverSize } = useSettingsStore()
   
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -39,6 +41,18 @@ export default function DashboardPage() {
   const totalLibraries = data?.libraries.length || 0
   const readingCount = data?.continue_reading.length || 0
   const favoritesCount = data?.favorites_count || 0
+
+  // 根据封面尺寸计算网格列数
+  const getGridColumns = () => {
+    switch (coverSize) {
+      case 'small':
+        return { xs: 4, sm: 3, md: 2.4, lg: 2, xl: 1.5 }
+      case 'medium':
+        return { xs: 6, sm: 4, md: 3, lg: 2, xl: 2 }
+      case 'large':
+        return { xs: 6, sm: 4, md: 3, lg: 2.4, xl: 2 }
+    }
+  }
 
   return (
     <Box sx={{ p: 3 }}>
@@ -191,12 +205,12 @@ export default function DashboardPage() {
           <Grid container spacing={2}>
             {loading
               ? [1, 2, 3, 4, 5, 6].map((i) => (
-                  <Grid item xs={6} sm={4} md={3} lg={2} key={i}>
+                  <Grid item {...getGridColumns()} key={i}>
                     <BookCard loading />
                   </Grid>
                 ))
               : libraryLatest.books.slice(0, 6).map((book) => (
-                  <Grid item xs={6} sm={4} md={3} lg={2} key={book.id}>
+                  <Grid item {...getGridColumns()} key={book.id}>
                     <BookCard book={book} />
                   </Grid>
                 ))}
