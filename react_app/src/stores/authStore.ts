@@ -28,11 +28,10 @@ export const useAuthStore = create<AuthState>()(
       isLoading: true,
 
       login: async (username: string, password: string) => {
-        const formData = new FormData()
-        formData.append('username', username)
-        formData.append('password', password)
-
-        const response = await api.post('/api/auth/login', formData)
+        const response = await api.post('/api/auth/login', {
+          username,
+          password,
+        })
         const { access_token, user } = response.data
 
         set({

@@ -28,6 +28,13 @@ class Token(BaseModel):
     token_type: str
 
 
+class LoginResponse(BaseModel):
+    """登录响应模型（包含用户信息）"""
+    access_token: str
+    token_type: str
+    user: dict
+
+
 class UserResponse(BaseModel):
     """用户响应模型"""
     id: int
@@ -128,14 +135,14 @@ class LoginRequest(BaseModel):
     password: str
 
 
-@router.post("/login", response_model=Token)
+@router.post("/login", response_model=LoginResponse)
 async def login_json(
     login_data: LoginRequest,
     db: AsyncSession = Depends(get_db)
 ):
     """
     用户登录（JSON格式）
-    用于Flutter Web等现代前端
+    用于Flutter Web和React Web等现代前端
     """
     # 查找用户
     result = await db.execute(
@@ -155,7 +162,16 @@ async def login_json(
     
     log.info(f"用户登录: {user.username}")
     
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "is_admin": user.is_admin,
+        }
+    }
 
 
 @router.get("/me", response_model=UserResponse)
