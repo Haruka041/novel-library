@@ -1,7 +1,7 @@
 # ===========================================
 # 阶段1: 构建 React WebUI
 # ===========================================
-FROM node:18-alpine AS react-builder
+FROM node:20-alpine AS react-builder
 
 WORKDIR /app/react_app
 
