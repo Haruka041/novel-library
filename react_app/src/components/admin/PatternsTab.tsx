@@ -137,8 +137,15 @@ function PatternsTabContent() {
 
   const loadLibraries = async () => {
     try {
-      const response = await api.get<Library[]>('/api/admin/libraries')
-      setLibraries(response.data || [])
+      const response = await api.get<Library[]>('/api/libraries')
+      // 确保返回数组
+      const data = response.data
+      if (Array.isArray(data)) {
+        setLibraries(data)
+      } else {
+        console.error('书库数据格式错误，期望数组:', data)
+        setLibraries([])
+      }
     } catch (err) {
       console.error('加载书库失败:', err)
       setLibraries([])
