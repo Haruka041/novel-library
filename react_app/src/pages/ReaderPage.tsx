@@ -87,15 +87,36 @@ export default function ReaderPage() {
     }
   }, [id])
 
-  // 保存进度（防抖）
+  // 保存进度（防抖）- 减少延迟到1秒
   useEffect(() => {
     const timer = setTimeout(() => {
       if (progress > 0 && id) {
         saveProgress()
       }
-    }, 3000)
+    }, 1000)
     return () => clearTimeout(timer)
   }, [progress])
+
+  // 页面卸载时保存进度
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (progress > 0 && id) {
+        // 使用 sendBeacon 确保页面关闭前发送
+        const data = JSON.stringify({
+          progress: progress,
+          position: null,
+          finished: progress >= 0.98,
+        })
+        navigator.sendBeacon(
+          `/api/progress/${id}`,
+          new Blob([data], { type: 'application/json' })
+        )
+      }
+    }
+    
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [progress, id])
 
   // 加载保存的设置
   useEffect(() => {
@@ -388,9 +409,15 @@ export default function ReaderPage() {
       {/* 顶部栏 */}
       <AppBar position="fixed" sx={{ bgcolor: 'rgba(0,0,0,0.8)' }}>
         <Toolbar>
-          <IconButton edge="start" color="inherit" onClick={() => navigate(-1)}>
-            <ArrowBack />
-          </IconButton>
+        <IconButton edge="start" color="inherit" onClick={() => {
+          // 退出前保存进度
+          if (progress > 0 && id) {
+            saveProgress()
+          }
+          navigate(-1)
+        }}>
+          <ArrowBack />
+        </IconButton>
           <Typography variant="subtitle1" noWrap sx={{ flex: 1, ml: 1 }}>
             {bookInfo?.title}
           </Typography>

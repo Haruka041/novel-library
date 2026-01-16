@@ -9,6 +9,7 @@ import {
   AccessTime, Storage
 } from '@mui/icons-material'
 import api from '../services/api'
+import { useAuthStore } from '../stores/authStore'
 
 interface BookDetail {
   id: number
@@ -27,6 +28,7 @@ interface BookDetail {
 export default function BookDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const { token } = useAuthStore()
   
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -68,7 +70,11 @@ export default function BookDetailPage() {
   }
 
   const handleDownload = () => {
-    window.open(`/api/books/${id}/download`, '_blank')
+    if (!token) {
+      alert('请先登录')
+      return
+    }
+    window.open(`/api/books/${id}/download?token=${token}`, '_blank')
   }
 
   const toggleFavorite = async () => {
