@@ -82,6 +82,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
   Widget _buildLibraryListView() {
     return Scaffold(
       appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => context.go('/home'),
+        ),
         title: const Text('选择书库'),
         actions: [
           IconButton(
@@ -381,7 +385,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 return BookCard(
                   book: book,
                   coverUrl: coverUrl,
-                  onTap: () => context.push('/books/${book.id}'),
+                  onTap: () => context.push('/book/${book.id}'),
                 );
               },
             ),

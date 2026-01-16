@@ -371,7 +371,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
                       Expanded(
                         child: ElevatedButton.icon(
                           onPressed: () {
-                            context.push('/reader/${_book!.id}');
+                            context.push('/book/${_book!.id}/reader');
                           },
                           icon: Icon(
                             _readingProgress != null && _readingProgress! > 0

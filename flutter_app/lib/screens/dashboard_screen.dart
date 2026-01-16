@@ -81,7 +81,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 for (var libraryLatest in provider.latestByLibrary) ...[
                   _buildSectionHeaderWithAction(
                     '📕 最新${libraryLatest.libraryName}',
-                    onSeeAll: () => context.push('/library?libraryId=${libraryLatest.libraryId}'),
+                    onSeeAll: () => context.push('/library/${libraryLatest.libraryId}'),
                   ),
                   SliverToBoxAdapter(
                     child: _buildBooksRow(libraryLatest.books),
@@ -253,7 +253,7 @@ class _ContinueReadingCard extends StatelessWidget {
       child: Card(
         clipBehavior: Clip.antiAlias,
         child: InkWell(
-          onTap: () => context.push('/books/${item.id}'),
+          onTap: () => context.push('/book/${item.id}'),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -343,7 +343,7 @@ class _LibraryCard extends StatelessWidget {
       child: Card(
         clipBehavior: Clip.antiAlias,
         child: InkWell(
-          onTap: () => context.push('/library?libraryId=${library.id}'),
+          onTap: () => context.push('/library/${library.id}'),
           child: Stack(
             fit: StackFit.expand,
             children: [
@@ -430,7 +430,7 @@ class _BookPosterCard extends StatelessWidget {
       child: Card(
         clipBehavior: Clip.antiAlias,
         child: InkWell(
-          onTap: () => context.push('/books/${book.id}'),
+          onTap: () => context.push('/book/${book.id}'),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [

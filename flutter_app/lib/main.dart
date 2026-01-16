@@ -98,28 +98,48 @@ class MyApp extends StatelessWidget {
           path: '/home-old',  // 保留旧版首页
           builder: (context, state) => const HomeScreen(),
         ),
+        // 书库列表（所有书籍）
         GoRoute(
           path: '/library',
           builder: (context, state) {
-            // 支持通过 query 参数筛选书库
+            // 支持通过 query 参数筛选书库（兼容旧格式）
             final libraryIdStr = state.uri.queryParameters['libraryId'];
             final libraryId = libraryIdStr != null ? int.tryParse(libraryIdStr) : null;
             return LibraryScreen(libraryId: libraryId);
           },
         ),
+        // 特定书库 /library/:libraryId
         GoRoute(
-          path: '/books/:id',
+          path: '/library/:libraryId',
+          builder: (context, state) {
+            final libraryId = int.parse(state.pathParameters['libraryId']!);
+            return LibraryScreen(libraryId: libraryId);
+          },
+        ),
+        // 书籍详情 /book/:id
+        GoRoute(
+          path: '/book/:id',
           builder: (context, state) {
             final id = int.parse(state.pathParameters['id']!);
             return BookDetailScreen(bookId: id);
           },
         ),
+        // 阅读器 /book/:id/reader
         GoRoute(
-          path: '/reader/:id',
+          path: '/book/:id/reader',
           builder: (context, state) {
             final id = int.parse(state.pathParameters['id']!);
             return ReaderScreen(bookId: id);
           },
+        ),
+        // 保留旧路由兼容
+        GoRoute(
+          path: '/books/:id',
+          redirect: (context, state) => '/book/${state.pathParameters['id']}',
+        ),
+        GoRoute(
+          path: '/reader/:id',
+          redirect: (context, state) => '/book/${state.pathParameters['id']}/reader',
         ),
         GoRoute(
           path: '/search',
