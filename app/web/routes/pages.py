@@ -1,22 +1,23 @@
 """
 页面路由
-提供阅读器等HTML页面
+提供旧版HTML页面（已弃用，保留给非Flutter客户端）
 """
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.web.app import templates
 
 router = APIRouter()
 
 
-# 阅读器页面（保留，供Flutter调用）
+# 旧版阅读器路由已删除，现在使用 Flutter 原生阅读器
+# 如果通过旧链接访问，重定向到 Flutter UI
 
-@router.get("/reader/{book_id}", response_class=HTMLResponse)
-async def reader_page(request: Request, book_id: int):
+@router.get("/legacy/reader/{book_id}", response_class=HTMLResponse)
+async def legacy_reader_page(request: Request, book_id: int):
     """
-    统一阅读器入口
-    根据书籍格式自动选择合适的阅读器
+    旧版阅读器入口（保留供兼容性）
+    建议使用 Flutter 阅读器: /#/reader/{book_id}
     """
     return templates.TemplateResponse(
         "reader.html",
@@ -24,18 +25,18 @@ async def reader_page(request: Request, book_id: int):
     )
 
 
-@router.get("/reader/txt/{book_id}", response_class=HTMLResponse)
-async def txt_reader_page(request: Request, book_id: int):
-    """TXT阅读器页面"""
+@router.get("/legacy/reader/txt/{book_id}", response_class=HTMLResponse)
+async def legacy_txt_reader_page(request: Request, book_id: int):
+    """旧版TXT阅读器页面"""
     return templates.TemplateResponse(
         "reader_txt.html",
         {"request": request, "book_id": book_id, "title": "TXT阅读器"}
     )
 
 
-@router.get("/reader/epub/{book_id}", response_class=HTMLResponse)
-async def epub_reader_page(request: Request, book_id: int):
-    """EPUB阅读器页面"""
+@router.get("/legacy/reader/epub/{book_id}", response_class=HTMLResponse)
+async def legacy_epub_reader_page(request: Request, book_id: int):
+    """旧版EPUB阅读器页面"""
     return templates.TemplateResponse(
         "reader_epub.html",
         {"request": request, "book_id": book_id, "title": "EPUB阅读器"}
