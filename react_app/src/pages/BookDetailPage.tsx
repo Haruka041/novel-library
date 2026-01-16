@@ -38,6 +38,7 @@ export default function BookDetailPage() {
   useEffect(() => {
     if (id) {
       loadBook()
+      checkFavoriteStatus()
     }
   }, [id])
 
@@ -52,6 +53,15 @@ export default function BookDetailPage() {
       setError('加载失败，请刷新重试')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const checkFavoriteStatus = async () => {
+    try {
+      const response = await api.get(`/user/favorites/${id}/status`)
+      setIsFavorite(response.data.is_favorite)
+    } catch (err) {
+      console.error('检查收藏状态失败:', err)
     }
   }
 
@@ -78,8 +88,18 @@ export default function BookDetailPage() {
   }
 
   const toggleFavorite = async () => {
-    // TODO: 实现收藏功能
-    setIsFavorite(!isFavorite)
+    try {
+      if (isFavorite) {
+        await api.delete(`/user/favorites/${id}`)
+        setIsFavorite(false)
+      } else {
+        await api.post(`/user/favorites/${id}`)
+        setIsFavorite(true)
+      }
+    } catch (err) {
+      console.error('切换收藏失败:', err)
+      alert('操作失败，请重试')
+    }
   }
 
   if (loading) {

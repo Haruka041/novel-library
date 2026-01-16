@@ -1,11 +1,35 @@
-import { Box, Typography, Card, CardContent, Avatar, Divider, List, ListItem, ListItemIcon, ListItemText, ToggleButtonGroup, ToggleButton } from '@mui/material'
+import { Box, Typography, Card, CardContent, Avatar, Divider, List, ListItem, ListItemIcon, ListItemText, ToggleButtonGroup, ToggleButton, Chip } from '@mui/material'
 import { Person, Lock, History, Favorite, DarkMode, LightMode, SettingsBrightness, Logout } from '@mui/icons-material'
 import { useAuthStore } from '../stores/authStore'
 import { useThemeStore } from '../stores/themeStore'
+import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
+import api from '../services/api'
 
 export default function ProfilePage() {
   const { user, logout } = useAuthStore()
   const { preference, setPreference } = useThemeStore()
+  const navigate = useNavigate()
+  const [favoriteCount, setFavoriteCount] = useState(0)
+  const [historyCount, setHistoryCount] = useState(0)
+
+  // 获取统计数据
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        // 获取收藏数量
+        const favRes = await api.get('/user/favorites', { params: { limit: 1 } })
+        setFavoriteCount(favRes.data.total || 0)
+
+        // 获取历史记录数量  
+        const histRes = await api.get('/user/history', { params: { limit: 1 } })
+        setHistoryCount(histRes.data.total || 0)
+      } catch (error) {
+        console.error('获取统计数据失败:', error)
+      }
+    }
+    fetchStats()
+  }, [])
 
   return (
     <Box sx={{ p: 3 }}>
@@ -69,18 +93,20 @@ export default function ProfilePage() {
             <ListItemText primary="修改密码" secondary="更改账户密码" />
           </ListItem>
           <Divider />
-          <ListItem button>
+          <ListItem button onClick={() => navigate('/favorites')}>
             <ListItemIcon>
               <Favorite />
             </ListItemIcon>
             <ListItemText primary="我的收藏" secondary="查看收藏的书籍" />
+            <Chip label={favoriteCount} size="small" color="primary" />
           </ListItem>
           <Divider />
-          <ListItem button>
+          <ListItem button onClick={() => navigate('/history')}>
             <ListItemIcon>
               <History />
             </ListItemIcon>
             <ListItemText primary="阅读历史" secondary="查看阅读记录" />
+            <Chip label={historyCount} size="small" color="secondary" />
           </ListItem>
           <Divider />
           <ListItem button onClick={logout}>
