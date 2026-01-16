@@ -114,4 +114,129 @@ class StorageService {
   Future<String?> getSavedUsername() async {
     return _prefs?.getString('saved_username');
   }
+
+  // ===== 阅读器设置 =====
+  
+  // 全局阅读器设置键
+  static const String _readerFontSizeKey = 'reader_font_size';
+  static const String _readerLineHeightKey = 'reader_line_height';
+  static const String _readerThemeKey = 'reader_theme';
+  static const String _readerFontFamilyKey = 'reader_font_family';
+  static const String _readerAutoScrollKey = 'reader_auto_scroll';
+  static const String _readerScrollSpeedKey = 'reader_scroll_speed';
+  static const String _readerPageModeKey = 'reader_page_mode';
+  
+  // 获取书籍特定设置的键
+  String _bookSettingsKey(int bookId, String setting) => 'book_${bookId}_$setting';
+  
+  // 全局字体大小
+  Future<void> saveReaderFontSize(double size) async {
+    await _prefs?.setDouble(_readerFontSizeKey, size);
+  }
+  
+  Future<double> getReaderFontSize() async {
+    return _prefs?.getDouble(_readerFontSizeKey) ?? 18.0;
+  }
+  
+  // 全局行距
+  Future<void> saveReaderLineHeight(double height) async {
+    await _prefs?.setDouble(_readerLineHeightKey, height);
+  }
+  
+  Future<double> getReaderLineHeight() async {
+    return _prefs?.getDouble(_readerLineHeightKey) ?? 1.8;
+  }
+  
+  // 全局主题
+  Future<void> saveReaderTheme(String theme) async {
+    await _prefs?.setString(_readerThemeKey, theme);
+  }
+  
+  Future<String> getReaderTheme() async {
+    return _prefs?.getString(_readerThemeKey) ?? 'dark';
+  }
+  
+  // 全局字体
+  Future<void> saveReaderFontFamily(String fontFamily) async {
+    await _prefs?.setString(_readerFontFamilyKey, fontFamily);
+  }
+  
+  Future<String> getReaderFontFamily() async {
+    return _prefs?.getString(_readerFontFamilyKey) ?? 'default';
+  }
+  
+  // 自动滚动开关
+  Future<void> saveReaderAutoScroll(bool enabled) async {
+    await _prefs?.setBool(_readerAutoScrollKey, enabled);
+  }
+  
+  Future<bool> getReaderAutoScroll() async {
+    return _prefs?.getBool(_readerAutoScrollKey) ?? false;
+  }
+  
+  // 滚动速度
+  Future<void> saveReaderScrollSpeed(int speed) async {
+    await _prefs?.setInt(_readerScrollSpeedKey, speed);
+  }
+  
+  Future<int> getReaderScrollSpeed() async {
+    return _prefs?.getInt(_readerScrollSpeedKey) ?? 5;
+  }
+  
+  // 翻页模式: scroll, tap, slide
+  Future<void> saveReaderPageMode(String mode) async {
+    await _prefs?.setString(_readerPageModeKey, mode);
+  }
+  
+  Future<String> getReaderPageMode() async {
+    return _prefs?.getString(_readerPageModeKey) ?? 'scroll';
+  }
+  
+  // 书籍特定设置
+  Future<void> saveBookReaderSettings(int bookId, Map<String, dynamic> settings) async {
+    final jsonStr = json.encode(settings);
+    await _prefs?.setString('book_${bookId}_reader_settings', jsonStr);
+  }
+  
+  Future<Map<String, dynamic>?> getBookReaderSettings(int bookId) async {
+    final jsonStr = _prefs?.getString('book_${bookId}_reader_settings');
+    if (jsonStr == null) return null;
+    try {
+      return json.decode(jsonStr) as Map<String, dynamic>;
+    } catch (e) {
+      return null;
+    }
+  }
+  
+  // 保存所有阅读器设置（一次性保存）
+  Future<void> saveAllReaderSettings({
+    required double fontSize,
+    required double lineHeight,
+    required String theme,
+    String? fontFamily,
+    bool? autoScroll,
+    int? scrollSpeed,
+    String? pageMode,
+  }) async {
+    await _prefs?.setDouble(_readerFontSizeKey, fontSize);
+    await _prefs?.setDouble(_readerLineHeightKey, lineHeight);
+    await _prefs?.setString(_readerThemeKey, theme);
+    if (fontFamily != null) await _prefs?.setString(_readerFontFamilyKey, fontFamily);
+    if (autoScroll != null) await _prefs?.setBool(_readerAutoScrollKey, autoScroll);
+    if (scrollSpeed != null) await _prefs?.setInt(_readerScrollSpeedKey, scrollSpeed);
+    if (pageMode != null) await _prefs?.setString(_readerPageModeKey, pageMode);
+  }
+  
+  // 加载所有阅读器设置
+  Future<Map<String, dynamic>> loadAllReaderSettings() async {
+    return {
+      'fontSize': _prefs?.getDouble(_readerFontSizeKey) ?? 18.0,
+      'lineHeight': _prefs?.getDouble(_readerLineHeightKey) ?? 1.8,
+      'theme': _prefs?.getString(_readerThemeKey) ?? 'dark',
+      'fontFamily': _prefs?.getString(_readerFontFamilyKey) ?? 'default',
+      'autoScroll': _prefs?.getBool(_readerAutoScrollKey) ?? false,
+      'scrollSpeed': _prefs?.getInt(_readerScrollSpeedKey) ?? 5,
+      'pageMode': _prefs?.getString(_readerPageModeKey) ?? 'scroll',
+    };
+  }
 }

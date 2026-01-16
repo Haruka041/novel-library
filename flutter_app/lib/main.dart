@@ -49,19 +49,29 @@ class MyApp extends StatelessWidget {
 
   GoRouter _router(AuthProvider authProvider) {
     return GoRouter(
-      initialLocation: authProvider.isAuthenticated ? '/home' : '/login',
+      // 不设置 initialLocation，让路由从 URL 读取
+      // 这样刷新页面时能保持当前路由
       redirect: (context, state) {
         final isAuth = authProvider.isAuthenticated;
-        final isLoggingIn = state.matchedLocation == '/login';
-
+        final currentPath = state.matchedLocation;
+        final isLoggingIn = currentPath == '/login';
+        
+        // 未登录且不在登录页 -> 跳转登录
         if (!isAuth && !isLoggingIn) {
           return '/login';
         }
 
+        // 已登录在登录页 -> 跳转首页
         if (isAuth && isLoggingIn) {
           return '/home';
         }
+        
+        // 已登录访问根路径 -> 跳转首页
+        if (isAuth && (currentPath == '/' || currentPath.isEmpty)) {
+          return '/home';
+        }
 
+        // 其他情况保持当前路由
         return null;
       },
       routes: [
