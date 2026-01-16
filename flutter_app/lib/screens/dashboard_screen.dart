@@ -253,7 +253,7 @@ class _ContinueReadingCard extends StatelessWidget {
       child: Card(
         clipBehavior: Clip.antiAlias,
         child: InkWell(
-          onTap: () => context.push('/book/${item.id}'),
+          onTap: () => context.push('/book/${item.id}/reader'),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [

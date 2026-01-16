@@ -102138,7 +102138,7 @@ A.yp.prototype={
 D(a){var s=null,r=A.kP(),q=this.c,p=q.d,o=q.e,n=t.p
 return A.aM(s,A.eh(A.is(!1,s,!0,A.aL(A.a([A.cS(A.dZ(B.aK,A.a([A.w1(r+(p==null?"":p),new A.asI(),B.di,s,s,s),A.dW(0,A.aM(s,s,B.e,s,s,new A.bf(s,s,s,s,s,new A.fN(B.cz,B.c_,B.aY,A.a([B.C,A.D(204,0,0,0)],t.W),s,s),B.Q),s,s,s,s,s,s,s,s),60,s,0,0,s,s),A.dW(8,A.aL(A.a([A.T(q.b,1,B.ae,s,B.X1,s,s),B.mn,A.T(""+B.c.ak(o*100)+"%",s,s,s,A.aK(s,s,B.f0,s,s,s,s,s,s,s,s,12,s,s,s,s,s,!0,s,s,s,s,s,s,s,s),s,s)],n),B.a3,B.o,B.l),s,s,8,8,s,s)],n),B.m,B.eE,s),1),A.aeV(B.aP,s,o,new A.nY(A.K(a).fr,t.ZU))],n),B.dm,B.o,B.l),s,!0,s,s,s,s,s,s,s,s,s,new A.asJ(this,a),s,s,s,s,s,s,s),B.b3,s,s,s,s),B.e,s,s,s,s,s,s,B.cm,s,s,s,260)}}
 A.asJ.prototype={
-$0(){return A.ei(this.b,"/book/"+this.a.c.a,t.X)},
+$0(){return A.ei(this.b,"/book/"+this.a.c.a+"/reader",t.X)},
 $S:0}
 A.asI.prototype={
 $3(a,b,c){var s=null
