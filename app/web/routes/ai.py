@@ -490,6 +490,141 @@ async def suggest_pattern_for_filename(
     return result
 
 
+@router.post("/patterns/batch-analyze-library/{library_id}")
+async def batch_analyze_library(
+    library_id: int,
+    batch_size: int = 1000,
+    apply_results: bool = False,
+    db: Session = Depends(get_db),
+    admin = Depends(admin_required)
+):
+    """
+    批量AI分析书库文件名（少次多量原则，防止429）
+    
+    - batch_size: 每批处理数量，默认1000
+    - apply_results: 是否自动应用分析结果（更新书籍元数据）
+    
+    返回：识别的书名、作者、额外信息（包含点评）、生成的规则
+    """
+    if not ai_config.is_enabled():
+        raise HTTPException(400, "AI功能未启用")
+    
+    library = db.query(Library).filter(Library.id == library_id).first()
+    if not library:
+        raise HTTPException(404, "书库不存在")
+    
+    # 获取所有文件名
+    from app.models import Book, Author
+    versions = db.query(BookVersion).join(
+        BookVersion.book
+    ).filter(
+        BookVersion.book.has(library_id=library_id)
+    ).all()
+    
+    if not versions:
+        return {"success": False, "error": "书库中没有书籍"}
+    
+    # 构建文件名到版本的映射
+    filename_to_version = {v.file_name: v for v in versions}
+    filenames = list(filename_to_version.keys())
+    
+    # 调用批量分析
+    service = get_ai_service()
+    result = await service.batch_analyze_filenames(filenames, batch_size=batch_size)
+    
+    if not result.get("success"):
+        return result
+    
+    # 如果需要应用结果
+    applied_count = 0
+    reviews_added = 0
+    
+    if apply_results and result.get("recognized_books"):
+        for book_info in result["recognized_books"]:
+            filename = book_info.get("filename")
+            if filename not in filename_to_version:
+                continue
+            
+            version = filename_to_version[filename]
+            book = version.book
+            
+            # 更新书名
+            if book_info.get("title"):
+                book.title = book_info["title"].strip()
+                applied_count += 1
+            
+            # 更新作者
+            if book_info.get("author"):
+                author_name = book_info["author"].strip()
+                # 查找或创建作者
+                author = db.query(Author).filter(Author.name == author_name).first()
+                if not author:
+                    author = Author(name=author_name)
+                    db.add(author)
+                    db.flush()
+                book.author_id = author.id
+            
+            # 如果有点评/评价，添加到简介
+            if book_info.get("has_review") and book_info.get("review_text"):
+                review_text = book_info["review_text"].strip()
+                if book.description:
+                    # 追加到现有简介
+                    if review_text not in book.description:
+                        book.description = f"{book.description}\n\n【读者评价】{review_text}"
+                        reviews_added += 1
+                else:
+                    book.description = f"【读者评价】{review_text}"
+                    reviews_added += 1
+        
+        db.commit()
+    
+    # 保存生成的规则
+    patterns_created = []
+    for pattern_data in result.get("patterns", []):
+        regex = pattern_data.get("regex")
+        if not regex:
+            continue
+        
+        # 检查规则是否已存在
+        existing = db.query(FilenamePattern).filter(
+            FilenamePattern.regex_pattern == regex
+        ).first()
+        
+        if not existing:
+            try:
+                # 验证正则表达式
+                re.compile(regex)
+                
+                pattern = FilenamePattern(
+                    name=pattern_data.get("name", "AI生成规则"),
+                    regex_pattern=regex,
+                    title_group=pattern_data.get("title_group", 1),
+                    author_group=pattern_data.get("author_group", 2),
+                    extra_group=pattern_data.get("extra_group", 0),
+                    library_id=library_id,
+                    match_count=pattern_data.get("match_count", 0),
+                    created_by='ai'
+                )
+                db.add(pattern)
+                patterns_created.append(pattern_data.get("name"))
+            except:
+                pass
+    
+    if patterns_created:
+        db.commit()
+    
+    result["patterns_created"] = patterns_created
+    result["applied_count"] = applied_count
+    result["reviews_added"] = reviews_added
+    
+    # 限制返回的书籍详情数量
+    if len(result.get("recognized_books", [])) > 100:
+        result["recognized_books"] = result["recognized_books"][:100]
+        result["books_truncated"] = True
+    
+    return result
+
+
 @router.post("/patterns/batch-apply")
 async def batch_apply_patterns(
     library_id: int,

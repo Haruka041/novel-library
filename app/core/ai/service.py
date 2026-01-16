@@ -419,6 +419,155 @@ class AIService:
             log.warning(f"解析AI响应失败: {e}")
             return {"success": False, "error": f"解析响应失败: {str(e)}", "raw": response.content}
     
+    async def batch_analyze_filenames(
+        self, 
+        filenames: List[str], 
+        batch_size: int = 1000,
+        delay_between_batches: float = 2.0
+    ) -> Dict[str, Any]:
+        """
+        批量分析文件名，采用少次多量原则（防止429错误）
+        
+        每次发送最多batch_size条文件名，让AI返回：
+        1. 识别的书名、作者、额外信息
+        2. 如果额外信息包含点评/推书评价，标记出来
+        3. 基于这批文件名总结的识别规则
+        
+        Args:
+            filenames: 文件名列表
+            batch_size: 每批处理数量（默认1000）
+            delay_between_batches: 批次间延迟（秒）
+        
+        Returns:
+            分析结果，包含所有识别的元数据和规则
+        """
+        import asyncio
+        import json
+        
+        if not self.config.is_enabled():
+            return {"success": False, "error": "AI功能未启用"}
+        
+        all_results = []
+        all_patterns = []
+        total_batches = (len(filenames) + batch_size - 1) // batch_size
+        
+        for batch_idx in range(total_batches):
+            start = batch_idx * batch_size
+            end = min(start + batch_size, len(filenames))
+            batch = filenames[start:end]
+            
+            log.info(f"AI批量分析：处理第 {batch_idx + 1}/{total_batches} 批，共 {len(batch)} 个文件名")
+            
+            # 构建文件名列表
+            filename_list = "\n".join([f"{i+1}. {fn}" for i, fn in enumerate(batch)])
+            
+            prompt = f"""请分析以下{len(batch)}个小说文件名，为每个文件名提取元数据。
+
+文件名列表：
+{filename_list}
+
+请为每个文件名提取：
+1. 书名（title）
+2. 作者（author，无则null）
+3. 额外信息（extra，如系列名、卷数、版本、点评/推荐评价等）
+4. 如果额外信息包含点评或推书评价（如"强推"、"神作"、"必看"、描述性评价等），标记 has_review: true
+
+同时，基于这批文件名，总结出通用的解析规则（正则表达式）。
+
+返回JSON格式：
+{{
+    "books": [
+        {{
+            "filename": "原文件名",
+            "title": "书名",
+            "author": "作者或null",
+            "extra": "额外信息或null",
+            "has_review": false,
+            "review_text": "如果有点评，提取点评内容"
+        }}
+    ],
+    "patterns": [
+        {{
+            "name": "规则名称",
+            "regex": "正则表达式",
+            "title_group": 1,
+            "author_group": 2,
+            "extra_group": 0,
+            "match_count": 10
+        }}
+    ],
+    "batch_summary": "本批次分析总结"
+}}
+
+注意：
+1. 正则表达式需兼容Python re模块
+2. 尽量精确提取，无法识别的字段返回null
+3. 点评/评价通常出现在文件名末尾或括号内
+
+返回纯JSON："""
+            
+            response = await self.chat([
+                {"role": "system", "content": "你是专业的小说文件名解析助手。分析文件名并提取书名、作者等元数据。只返回JSON格式数据。"},
+                {"role": "user", "content": prompt}
+            ], max_tokens=4000)
+            
+            if not response.success:
+                log.error(f"批次 {batch_idx + 1} 分析失败: {response.error}")
+                # 如果是429错误，等待更长时间后重试
+                if "429" in str(response.error):
+                    log.warning("遇到429限流，等待30秒后重试...")
+                    await asyncio.sleep(30)
+                    # 重试一次
+                    response = await self.chat([
+                        {"role": "system", "content": "你是专业的小说文件名解析助手。分析文件名并提取书名、作者等元数据。只返回JSON格式数据。"},
+                        {"role": "user", "content": prompt}
+                    ], max_tokens=4000)
+                
+                if not response.success:
+                    continue
+            
+            try:
+                content = response.content.strip()
+                if content.startswith('```'):
+                    content = content.split('```')[1]
+                    if content.startswith('json'):
+                        content = content[4:]
+                
+                batch_result = json.loads(content)
+                
+                # 收集结果
+                if "books" in batch_result:
+                    all_results.extend(batch_result["books"])
+                if "patterns" in batch_result:
+                    all_patterns.extend(batch_result["patterns"])
+                
+                log.info(f"批次 {batch_idx + 1} 完成：识别 {len(batch_result.get('books', []))} 本书")
+                
+            except Exception as e:
+                log.warning(f"批次 {batch_idx + 1} 解析失败: {e}")
+            
+            # 批次间延迟，防止429
+            if batch_idx < total_batches - 1:
+                await asyncio.sleep(delay_between_batches)
+        
+        # 合并重复规则
+        unique_patterns = {}
+        for p in all_patterns:
+            regex = p.get('regex', '')
+            if regex in unique_patterns:
+                unique_patterns[regex]['match_count'] = unique_patterns[regex].get('match_count', 0) + p.get('match_count', 1)
+            else:
+                unique_patterns[regex] = p
+        
+        return {
+            "success": True,
+            "total_files": len(filenames),
+            "total_batches": total_batches,
+            "recognized_books": all_results,
+            "patterns": list(unique_patterns.values()),
+            "has_reviews_count": len([b for b in all_results if b.get('has_review')])
+        }
+    
     async def suggest_pattern_for_filename(self, filename: str, existing_patterns: List[Dict] = None) -> Dict[str, Any]:
         """
         为单个文件名建议解析规则
