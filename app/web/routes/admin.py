@@ -13,7 +13,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import FilenamePattern, Library, LibraryPermission, Book, User, BookTag
+from app.models import FilenamePattern, Library, LibraryPermission, LibraryTag, Book, User, BookTag, Tag
 from app.web.routes.auth import get_current_user
 from app.security import hash_password
 from app.utils.filename_analyzer import FilenameAnalyzer
@@ -522,6 +522,179 @@ async def get_library_users(
         "is_public": library.is_public,
         "authorized_users": users,
         "admin_count": len(admins),
+    }
+
+
+# ==================== 书库标签管理 API ====================
+
+class LibraryTagsUpdate(BaseModel):
+    """更新书库标签请求"""
+    tag_ids: List[int]
+
+
+@router.get("/admin/libraries/{library_id}/tags")
+async def get_library_tags(
+    library_id: int,
+    current_user: User = Depends(admin_required),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    获取书库的默认标签（管理员）
+    这些标签会自动应用到新扫描的书籍
+    """
+    result = await db.execute(
+        select(Library).where(Library.id == library_id)
+    )
+    library = result.scalar_one_or_none()
+    
+    if not library:
+        raise HTTPException(status_code=404, detail="书库不存在")
+    
+    # 获取书库标签
+    tag_result = await db.execute(
+        select(LibraryTag).where(LibraryTag.library_id == library_id)
+    )
+    library_tags = tag_result.scalars().all()
+    
+    # 获取标签详情
+    tags = []
+    for lt in library_tags:
+        tag_info = await db.execute(
+            select(Tag).where(Tag.id == lt.tag_id)
+        )
+        tag = tag_info.scalar_one_or_none()
+        if tag:
+            tags.append({
+                "id": tag.id,
+                "name": tag.name,
+                "type": tag.type,
+                "description": tag.description,
+            })
+    
+    return {
+        "library_id": library_id,
+        "library_name": library.name,
+        "tags": tags,
+    }
+
+
+@router.put("/admin/libraries/{library_id}/tags")
+async def update_library_tags(
+    library_id: int,
+    data: LibraryTagsUpdate,
+    current_user: User = Depends(admin_required),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    更新书库的默认标签（管理员）
+    设置后，新扫描入库的书籍会自动带上这些标签
+    """
+    result = await db.execute(
+        select(Library).where(Library.id == library_id)
+    )
+    library = result.scalar_one_or_none()
+    
+    if not library:
+        raise HTTPException(status_code=404, detail="书库不存在")
+    
+    # 删除现有标签关联
+    existing = await db.execute(
+        select(LibraryTag).where(LibraryTag.library_id == library_id)
+    )
+    for lt in existing.scalars().all():
+        await db.delete(lt)
+    
+    # 添加新标签关联
+    added_tags = []
+    for tag_id in data.tag_ids:
+        # 验证标签存在
+        tag_result = await db.execute(
+            select(Tag).where(Tag.id == tag_id)
+        )
+        tag = tag_result.scalar_one_or_none()
+        if tag:
+            lt = LibraryTag(library_id=library_id, tag_id=tag_id)
+            db.add(lt)
+            added_tags.append(tag.name)
+    
+    await db.commit()
+    
+    log.info(
+        f"管理员 {current_user.username} 更新书库 {library.name} 的默认标签: {added_tags}"
+    )
+    
+    return {
+        "library_id": library_id,
+        "library_name": library.name,
+        "tags_count": len(added_tags),
+        "tags": added_tags,
+    }
+
+
+@router.post("/admin/libraries/{library_id}/apply-tags")
+async def apply_library_tags_to_books(
+    library_id: int,
+    current_user: User = Depends(admin_required),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    将书库标签应用到书库内所有书籍（管理员）
+    会跳过已有相同标签的书籍
+    """
+    result = await db.execute(
+        select(Library).where(Library.id == library_id)
+    )
+    library = result.scalar_one_or_none()
+    
+    if not library:
+        raise HTTPException(status_code=404, detail="书库不存在")
+    
+    # 获取书库标签
+    tag_result = await db.execute(
+        select(LibraryTag).where(LibraryTag.library_id == library_id)
+    )
+    library_tags = tag_result.scalars().all()
+    
+    if not library_tags:
+        return {
+            "message": "该书库没有设置默认标签",
+            "applied_count": 0,
+        }
+    
+    tag_ids = [lt.tag_id for lt in library_tags]
+    
+    # 获取书库内所有书籍
+    books_result = await db.execute(
+        select(Book).where(Book.library_id == library_id)
+    )
+    books = books_result.scalars().all()
+    
+    applied_count = 0
+    for book in books:
+        for tag_id in tag_ids:
+            # 检查书籍是否已有此标签
+            existing = await db.execute(
+                select(BookTag)
+                .where(BookTag.book_id == book.id)
+                .where(BookTag.tag_id == tag_id)
+            )
+            if not existing.scalar_one_or_none():
+                bt = BookTag(book_id=book.id, tag_id=tag_id)
+                db.add(bt)
+                applied_count += 1
+    
+    await db.commit()
+    
+    log.info(
+        f"管理员 {current_user.username} 将书库 {library.name} 的默认标签应用到 {len(books)} 本书, "
+        f"添加 {applied_count} 个标签关联"
+    )
+    
+    return {
+        "library_id": library_id,
+        "library_name": library.name,
+        "books_count": len(books),
+        "applied_count": applied_count,
     }
 
 

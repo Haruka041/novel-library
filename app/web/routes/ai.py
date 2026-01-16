@@ -5,7 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.web.routes.dependencies import require_admin
+from app.web.routes.admin import admin_required
 from app.core.ai.config import ai_config
 from app.core.ai.service import get_ai_service
 
@@ -40,19 +40,19 @@ class FeaturesUpdate(BaseModel):
 
 
 @router.get("/config")
-async def get_ai_config(admin = Depends(require_admin)):
+async def get_ai_config(admin = Depends(admin_required)):
     """获取AI配置"""
     return ai_config.to_dict()
 
 
 @router.get("/status")
-async def get_ai_status(admin = Depends(require_admin)):
+async def get_ai_status(admin = Depends(admin_required)):
     """获取AI状态"""
     return ai_config.get_status()
 
 
 @router.put("/provider")
-async def update_provider(data: ProviderUpdate, admin = Depends(require_admin)):
+async def update_provider(data: ProviderUpdate, admin = Depends(admin_required)):
     """更新AI提供商配置"""
     update_data = {k: v for k, v in data.dict().items() if v is not None}
     
@@ -64,7 +64,7 @@ async def update_provider(data: ProviderUpdate, admin = Depends(require_admin)):
 
 
 @router.put("/features")
-async def update_features(data: FeaturesUpdate, admin = Depends(require_admin)):
+async def update_features(data: FeaturesUpdate, admin = Depends(admin_required)):
     """更新AI功能配置"""
     update_data = {k: v for k, v in data.dict().items() if v is not None}
     
@@ -76,7 +76,7 @@ async def update_features(data: FeaturesUpdate, admin = Depends(require_admin)):
 
 
 @router.post("/test")
-async def test_connection(admin = Depends(require_admin)):
+async def test_connection(admin = Depends(admin_required)):
     """测试AI连接"""
     if not ai_config.is_enabled():
         raise HTTPException(status_code=400, detail="AI功能未启用，请先配置API密钥")
@@ -103,7 +103,7 @@ async def test_connection(admin = Depends(require_admin)):
 async def extract_metadata(
     filename: str,
     content_preview: str = "",
-    admin = Depends(require_admin)
+    admin = Depends(admin_required)
 ):
     """使用AI提取元数据（测试）"""
     if not ai_config.is_enabled():
@@ -122,7 +122,7 @@ async def extract_metadata(
 async def classify_book(
     title: str,
     content_preview: str = "",
-    admin = Depends(require_admin)
+    admin = Depends(admin_required)
 ):
     """使用AI分类书籍（测试）"""
     if not ai_config.is_enabled():
@@ -162,7 +162,7 @@ PRESET_MODELS = {
 
 
 @router.get("/models")
-async def get_models(provider: Optional[str] = None, admin = Depends(require_admin)):
+async def get_models(provider: Optional[str] = None, admin = Depends(admin_required)):
     """获取预设模型列表"""
     if provider:
         return PRESET_MODELS.get(provider, [])

@@ -54,6 +54,7 @@ class Library(Base):
     permissions = relationship("LibraryPermission", back_populates="library", cascade="all, delete-orphan")
     paths = relationship("LibraryPath", back_populates="library", cascade="all, delete-orphan")
     scan_tasks = relationship("ScanTask", back_populates="library", cascade="all, delete-orphan")
+    library_tags = relationship("LibraryTag", back_populates="library", cascade="all, delete-orphan")
 
 
 class LibraryPath(Base):
@@ -68,6 +69,25 @@ class LibraryPath(Base):
 
     # 关系
     library = relationship("Library", back_populates="paths")
+
+
+class LibraryTag(Base):
+    """书库标签关联（书库默认标签，扫描时自动应用到新书）"""
+    __tablename__ = "library_tags"
+
+    id = Column(Integer, primary_key=True, index=True)
+    library_id = Column(Integer, ForeignKey("libraries.id", ondelete="CASCADE"), nullable=False)
+    tag_id = Column(Integer, ForeignKey("tags.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # 关系
+    library = relationship("Library", back_populates="library_tags")
+    tag = relationship("Tag", back_populates="library_tags")
+
+    # 唯一约束
+    __table_args__ = (
+        UniqueConstraint('library_id', 'tag_id', name='uq_library_tag'),
+    )
 
 
 class ScanTask(Base):
@@ -193,6 +213,7 @@ class Tag(Base):
 
     # 关系
     book_tags = relationship("BookTag", back_populates="tag", cascade="all, delete-orphan")
+    library_tags = relationship("LibraryTag", back_populates="tag", cascade="all, delete-orphan")
 
 
 class BookTag(Base):

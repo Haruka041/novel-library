@@ -17,7 +17,7 @@ from app.core.metadata.epub_parser import EpubParser
 from app.core.metadata.mobi_parser import MobiParser
 from app.core.metadata.txt_parser import TxtParser
 from app.core.tag_keywords import get_tags_from_filename, get_tags_from_content
-from app.models import Author, Book, BookVersion, Library, Tag
+from app.models import Author, Book, BookVersion, Library, LibraryTag, Tag
 from app.utils.file_hash import calculate_file_hash
 from app.utils.logger import log
 
@@ -65,6 +65,11 @@ class Scanner:
         
         # 加载自定义文件名解析规则
         await self.txt_parser.load_custom_patterns()
+        
+        # 加载书库默认标签
+        library_tag_ids = await self._get_library_tags(library_id)
+        if library_tag_ids:
+            log.info(f"书库默认标签: {len(library_tag_ids)} 个")
         
         stats = {
             "scanned": 0,
@@ -224,7 +229,7 @@ class Scanner:
             stats["added"] += 1
         else:  # new_book
             log.info(f"添加新书籍: {metadata['title']} by {metadata.get('author', 'Unknown')}")
-            await self._save_book(file_path, library_id, metadata)
+            await self._save_book(file_path, library_id, metadata, library_tag_ids)
             stats["added"] += 1
     
     def _extract_metadata(self, file_path: Path) -> Optional[dict]:
@@ -253,7 +258,22 @@ class Scanner:
             log.error(f"元数据提取失败: {file_path}, 错误: {e}")
             return None
     
-    async def _save_book(self, file_path: Path, library_id: int, metadata: dict):
+    async def _get_library_tags(self, library_id: int) -> list:
+        """
+        获取书库的默认标签ID列表
+        
+        Args:
+            library_id: 书库ID
+            
+        Returns:
+            标签ID列表
+        """
+        result = await self.db.execute(
+            select(LibraryTag.tag_id).where(LibraryTag.library_id == library_id)
+        )
+        return [row[0] for row in result.fetchall()]
+    
+    async def _save_book(self, file_path: Path, library_id: int, metadata: dict, library_tag_ids: list = None):
         """
         保存新书籍到数据库（包含主版本）
         
@@ -287,6 +307,17 @@ class Scanner:
                 if tag not in book.tags:
                     book.tags.append(tag)
             log.debug(f"为书籍添加标签: {metadata['auto_tags']}")
+        
+        # 添加书库默认标签
+        if library_tag_ids:
+            for tag_id in library_tag_ids:
+                tag_result = await self.db.execute(
+                    select(Tag).where(Tag.id == tag_id)
+                )
+                tag = tag_result.scalar_one_or_none()
+                if tag and tag not in book.tags:
+                    book.tags.append(tag)
+            log.debug(f"为书籍添加书库默认标签: {len(library_tag_ids)} 个")
         
         # 创建主版本 - 使用 as_posix() 确保路径格式一致
         file_hash = calculate_file_hash(file_path, settings.deduplicator.hash_algorithm)
