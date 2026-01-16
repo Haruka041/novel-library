@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { Box, Tabs, Tab, Typography, Container } from '@mui/material'
-import { People, LibraryBooks, Backup, Image, Settings } from '@mui/icons-material'
+import { People, LibraryBooks, Backup, Image, TextFields } from '@mui/icons-material'
 import UsersTab from '../components/admin/UsersTab'
 import LibrariesTab from '../components/admin/LibrariesTab'
 import BackupTab from '../components/admin/BackupTab'
 import CoversTab from '../components/admin/CoversTab'
+import FontsTab from '../components/admin/FontsTab'
 
 interface TabPanelProps {
   children?: React.ReactNode
@@ -41,6 +42,7 @@ export default function AdminPage() {
           <Tab icon={<LibraryBooks />} label="书库管理" iconPosition="start" />
           <Tab icon={<Backup />} label="备份管理" iconPosition="start" />
           <Tab icon={<Image />} label="封面管理" iconPosition="start" />
+          <Tab icon={<TextFields />} label="字体管理" iconPosition="start" />
         </Tabs>
       </Box>
 
@@ -55,6 +57,9 @@ export default function AdminPage() {
       </TabPanel>
       <TabPanel value={tabValue} index={3}>
         <CoversTab />
+      </TabPanel>
+      <TabPanel value={tabValue} index={4}>
+        <FontsTab />
       </TabPanel>
     </Container>
   )

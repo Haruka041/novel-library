@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   Box, Typography, IconButton, Drawer, List, ListItem, ListItemButton,
   ListItemText, Slider, ToggleButtonGroup, ToggleButton, CircularProgress,
-  Alert, AppBar, Toolbar, Divider
+  Alert, AppBar, Toolbar, Divider, FormControl, Select, MenuItem, InputLabel
 } from '@mui/material'
 import {
   ArrowBack, Menu, Settings, TextFields, FormatLineSpacing,
@@ -29,6 +29,14 @@ interface ReadingProgress {
   progress: number
   position: string | null
   finished: boolean
+}
+
+interface FontInfo {
+  id: string
+  name: string
+  family: string
+  is_builtin: boolean
+  file_url?: string
 }
 
 // 主题预设
@@ -66,6 +74,9 @@ export default function ReaderPage() {
   const [fontSize, setFontSize] = useState(18)
   const [lineHeight, setLineHeight] = useState(1.8)
   const [theme, setTheme] = useState<keyof typeof themes>('dark')
+  const [fontFamily, setFontFamily] = useState('"Noto Serif SC", "Source Han Serif CN", serif')
+  const [fonts, setFonts] = useState<FontInfo[]>([])
+  const [selectedFontId, setSelectedFontId] = useState('noto-serif')
   
   // 抽屉
   const [tocOpen, setTocOpen] = useState(false)
@@ -120,6 +131,19 @@ export default function ReaderPage() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
   }, [progress, id])
 
+  // 加载字体列表
+  useEffect(() => {
+    const loadFonts = async () => {
+      try {
+        const response = await api.get<{ fonts: FontInfo[] }>('/api/fonts')
+        setFonts(response.data.fonts)
+      } catch (err) {
+        console.error('加载字体列表失败:', err)
+      }
+    }
+    loadFonts()
+  }, [])
+
   // 加载保存的设置
   useEffect(() => {
     const savedSettings = localStorage.getItem('reader_settings')
@@ -129,6 +153,8 @@ export default function ReaderPage() {
         if (settings.fontSize) setFontSize(settings.fontSize)
         if (settings.lineHeight) setLineHeight(settings.lineHeight)
         if (settings.theme) setTheme(settings.theme)
+        if (settings.selectedFontId) setSelectedFontId(settings.selectedFontId)
+        if (settings.fontFamily) setFontFamily(settings.fontFamily)
       } catch (e) {
         console.error('加载阅读设置失败:', e)
       }
@@ -137,8 +163,19 @@ export default function ReaderPage() {
 
   // 保存设置
   useEffect(() => {
-    localStorage.setItem('reader_settings', JSON.stringify({ fontSize, lineHeight, theme }))
-  }, [fontSize, lineHeight, theme])
+    localStorage.setItem('reader_settings', JSON.stringify({ 
+      fontSize, lineHeight, theme, selectedFontId, fontFamily 
+    }))
+  }, [fontSize, lineHeight, theme, selectedFontId, fontFamily])
+
+  // 切换字体
+  const handleFontChange = (fontId: string) => {
+    const font = fonts.find(f => f.id === fontId)
+    if (font) {
+      setSelectedFontId(fontId)
+      setFontFamily(font.family)
+    }
+  }
 
   // EPUB 主题应用
   useEffect(() => {
@@ -480,7 +517,7 @@ export default function ReaderPage() {
             sx={{
               fontSize: fontSize,
               lineHeight: lineHeight,
-              fontFamily: '"Noto Serif SC", "Source Han Serif CN", serif',
+              fontFamily: fontFamily,
               whiteSpace: 'pre-wrap',
               wordBreak: 'break-word',
             }}
@@ -626,6 +663,27 @@ export default function ReaderPage() {
             valueLabelDisplay="auto"
             sx={{ mb: 3 }}
           />
+
+          <Divider sx={{ my: 2 }} />
+
+          <Typography variant="subtitle2" gutterBottom>
+            <TextFields sx={{ fontSize: 16, mr: 1, verticalAlign: 'middle' }} />
+            字体
+          </Typography>
+          <FormControl fullWidth size="small" sx={{ mb: 3 }}>
+            <Select
+              value={selectedFontId}
+              onChange={(e) => handleFontChange(e.target.value)}
+            >
+              {fonts.map((font) => (
+                <MenuItem key={font.id} value={font.id}>
+                  <Typography sx={{ fontFamily: font.family }}>
+                    {font.name}
+                  </Typography>
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
 
           <Divider sx={{ my: 2 }} />
 
