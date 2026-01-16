@@ -1,15 +1,53 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:intl/intl.dart';
 import '../services/api_client.dart';
 import '../services/storage_service.dart';
+
+/// 书签信息
+class BookmarkInfo {
+  final int id;
+  final String position;
+  final String? chapterTitle;
+  final String? note;
+  final DateTime createdAt;
+  
+  BookmarkInfo({
+    required this.id,
+    required this.position,
+    this.chapterTitle,
+    this.note,
+    required this.createdAt,
+  });
+  
+  factory BookmarkInfo.fromJson(Map<String, dynamic> json) {
+    return BookmarkInfo(
+      id: json['id'] as int,
+      position: json['position'] as String,
+      chapterTitle: json['chapter_title'] as String?,
+      note: json['note'] as String?,
+      createdAt: DateTime.parse(json['created_at'] as String),
+    );
+  }
+}
 
 /// 章节信息
 class Chapter {
   final String title;
   final int startIndex;
+  final int endIndex;
   
-  Chapter({required this.title, required this.startIndex});
+  Chapter({required this.title, required this.startIndex, this.endIndex = -1});
+  
+  Chapter copyWith({int? endIndex}) {
+    return Chapter(
+      title: title,
+      startIndex: startIndex,
+      endIndex: endIndex ?? this.endIndex,
+    );
+  }
 }
 
 /// 翻页模式
@@ -17,6 +55,126 @@ enum PageMode {
   scroll,  // 滚动模式
   tap,     // 点击翻页
   slide,   // 滑动翻页
+}
+
+/// 可用字体列表
+class FontOption {
+  final String name;
+  final String displayName;
+  final String? preview;
+  
+  const FontOption({
+    required this.name,
+    required this.displayName,
+    this.preview,
+  });
+}
+
+const List<FontOption> availableFonts = [
+  FontOption(name: 'default', displayName: '系统默认', preview: '春风又绿江南岸'),
+  FontOption(name: 'serif', displayName: '衬线体', preview: '春风又绿江南岸'),
+  FontOption(name: 'sans-serif', displayName: '无衬线', preview: '春风又绿江南岸'),
+  FontOption(name: 'Georgia', displayName: 'Georgia', preview: 'The quick brown fox'),
+  FontOption(name: 'Times New Roman', displayName: 'Times New Roman', preview: 'The quick brown fox'),
+  FontOption(name: 'Courier New', displayName: 'Courier New', preview: 'The quick brown fox'),
+  // Google Fonts (需要在 web/index.html 中引入)
+  FontOption(name: 'Noto Sans SC', displayName: '思源黑体', preview: '春风又绿江南岸'),
+  FontOption(name: 'Noto Serif SC', displayName: '思源宋体', preview: '春风又绿江南岸'),
+  FontOption(name: 'LXGW WenKai', displayName: '霞鹜文楷', preview: '春风又绿江南岸'),
+  FontOption(name: 'Ma Shan Zheng', displayName: '马善政楷体', preview: '春风又绿江南岸'),
+];
+
+/// 章节解析结果
+class ChapterParseResult {
+  final List<Chapter> chapters;
+  final List<String> lines;
+  final List<int> lineStartIndices;
+  
+  ChapterParseResult({
+    required this.chapters,
+    required this.lines,
+    required this.lineStartIndices,
+  });
+}
+
+/// 在后台线程解析章节（用于大文件）
+ChapterParseResult _parseChaptersIsolate(String content) {
+  final chapters = <Chapter>[];
+  
+  // 增强的章节识别正则模式
+  final patterns = [
+    // 中文章节：第X章/节/卷/部/回/集/篇
+    RegExp(r'^[　\s]*第[一二三四五六七八九十百千万零〇0-9]+[章节卷部回集篇][：:\s]*.{0,50}', multiLine: true),
+    // 带括号的章节：【第X章】
+    RegExp(r'^[　\s]*[【\[]第[一二三四五六七八九十百千万零〇0-9]+[章节卷部回集篇][】\]][：:\s]*.{0,50}', multiLine: true),
+    // 序章、楔子、尾声等特殊章节
+    RegExp(r'^[　\s]*(序章|序言|楔子|引子|引言|前言|后记|尾声|番外|终章|完结)[：:\s]*.{0,50}', multiLine: true),
+    // 卷/部标题
+    RegExp(r'^[　\s]*[第卷]?[一二三四五六七八九十百千万零〇0-9]+[卷部][：:\s]*.{0,50}', multiLine: true),
+    // 英文 Chapter
+    RegExp(r'^[　\s]*Chapter\s+\d+[.:]?\s*.{0,50}', multiLine: true, caseSensitive: false),
+    // 英文 Part/Book
+    RegExp(r'^[　\s]*(Part|Book|Section|Episode)\s+\d+[.:]?\s*.{0,50}', multiLine: true, caseSensitive: false),
+    // 数字编号：1. 或 1、或 001
+    RegExp(r'^[　\s]*\d{1,4}[\.、][　\s]+\S.{0,50}', multiLine: true),
+    // 纯数字章节（较宽松）
+    RegExp(r'^[　\s]*第?\s*\d{1,4}\s*[章节回]\s*.{0,50}', multiLine: true),
+  ];
+  
+  // 收集所有匹配的章节
+  final allMatches = <MapEntry<int, String>>[];
+  
+  for (final pattern in patterns) {
+    final matches = pattern.allMatches(content);
+    for (final match in matches) {
+      final title = match.group(0)!.trim();
+      // 过滤掉太短或太长的标题
+      if (title.length >= 2 && title.length <= 60) {
+        // 检查是否已存在相同位置的章节（去重）
+        final exists = allMatches.any((e) => (e.key - match.start).abs() < 10);
+        if (!exists) {
+          allMatches.add(MapEntry(match.start, title));
+        }
+      }
+    }
+  }
+  
+  // 按位置排序
+  allMatches.sort((a, b) => a.key.compareTo(b.key));
+  
+  // 转换为 Chapter 对象
+  for (int i = 0; i < allMatches.length; i++) {
+    final match = allMatches[i];
+    final endIndex = i + 1 < allMatches.length ? allMatches[i + 1].key : content.length;
+    chapters.add(Chapter(
+      title: match.value,
+      startIndex: match.key,
+      endIndex: endIndex,
+    ));
+  }
+  
+  // 如果没有找到章节，创建一个默认章节
+  if (chapters.isEmpty) {
+    chapters.add(Chapter(title: '正文', startIndex: 0, endIndex: content.length));
+  }
+  
+  // 将内容按行分割用于虚拟滚动
+  final lines = <String>[];
+  final lineStartIndices = <int>[];
+  
+  int currentIndex = 0;
+  final contentLines = content.split('\n');
+  for (final line in contentLines) {
+    lines.add(line);
+    lineStartIndices.add(currentIndex);
+    currentIndex += line.length + 1; // +1 for newline
+  }
+  
+  return ChapterParseResult(
+    chapters: chapters,
+    lines: lines,
+    lineStartIndices: lineStartIndices,
+  );
 }
 
 class ReaderScreen extends StatefulWidget {
@@ -35,8 +193,13 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   String? _bookTitle;
   String? _content;
   bool _isLoading = true;
+  bool _isParsing = false;
   bool _isRestoringProgress = false;
   String? _errorMessage;
+  
+  // 行数据（用于虚拟滚动）
+  List<String> _lines = [];
+  List<int> _lineStartIndices = [];
   
   // 阅读器设置
   double _fontSize = 18.0;
@@ -45,7 +208,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   String _fontFamily = 'default';
   bool _showSettings = false;
   bool _showChapters = false;
-  bool _showControls = true; // 是否显示顶栏底栏
+  bool _showControls = true;
   PageMode _pageMode = PageMode.scroll;
   
   // 章节目录
@@ -54,7 +217,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   
   // 自动滚动
   bool _autoScrollEnabled = false;
-  int _scrollSpeed = 5; // 1-10
+  int _scrollSpeed = 5;
   Timer? _autoScrollTimer;
   
   // 阅读进度
@@ -71,6 +234,18 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   
   // 保存进度防抖
   Timer? _saveProgressDebounce;
+  
+  // 书签
+  List<BookmarkInfo> _bookmarks = [];
+  bool _showBookmarks = false;
+  
+  // 状态栏时间
+  Timer? _clockTimer;
+  String _currentTime = '';
+  
+  // 文件大小信息
+  int _contentLength = 0;
+  static const int _largeFileThreshold = 500000; // 500KB 以上视为大文件
 
   @override
   void initState() {
@@ -78,6 +253,20 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     WidgetsBinding.instance.addObserver(this);
     _initReader();
     _scrollController.addListener(_onScroll);
+    _startClock();
+  }
+  
+  void _startClock() {
+    _updateTime();
+    _clockTimer = Timer.periodic(const Duration(minutes: 1), (_) => _updateTime());
+  }
+  
+  void _updateTime() {
+    if (mounted) {
+      setState(() {
+        _currentTime = DateFormat('HH:mm').format(DateTime.now());
+      });
+    }
   }
 
   @override
@@ -88,8 +277,73 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     _pageController.dispose();
     _autoScrollTimer?.cancel();
     _saveProgressDebounce?.cancel();
+    _clockTimer?.cancel();
     _saveProgress();
     super.dispose();
+  }
+  
+  // 书签方法
+  Future<void> _loadBookmarks() async {
+    try {
+      final response = await _apiClient.get('/api/books/${widget.bookId}/bookmarks');
+      if (response.statusCode == 200) {
+        final List<dynamic> data = response.data as List<dynamic>;
+        setState(() {
+          _bookmarks = data.map((json) => BookmarkInfo.fromJson(json as Map<String, dynamic>)).toList();
+        });
+      }
+    } catch (e) {
+      debugPrint('加载书签失败: $e');
+    }
+  }
+  
+  Future<void> _addBookmark() async {
+    final position = _currentPosition?.toString() ?? '0';
+    final chapterTitle = _chapters.isNotEmpty ? _chapters[_currentChapterIndex].title : null;
+    
+    try {
+      final response = await _apiClient.post('/api/bookmarks', data: {
+        'book_id': widget.bookId,
+        'position': position,
+        'chapter_title': chapterTitle,
+      });
+      
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('已添加书签 - ${chapterTitle ?? "当前位置"}'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+        _loadBookmarks();
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('添加书签失败: $e')),
+      );
+    }
+  }
+  
+  Future<void> _deleteBookmark(int bookmarkId) async {
+    try {
+      await _apiClient.delete('/api/bookmarks/$bookmarkId');
+      setState(() {
+        _bookmarks.removeWhere((b) => b.id == bookmarkId);
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('书签已删除')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('删除失败: $e')),
+      );
+    }
+  }
+  
+  void _jumpToBookmark(BookmarkInfo bookmark) {
+    final position = int.tryParse(bookmark.position) ?? 0;
+    _jumpToPosition(position);
+    setState(() => _showBookmarks = false);
   }
 
   @override
@@ -101,25 +355,43 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   void _onScroll() {
-    if (_scrollController.hasClients) {
-      final maxScroll = _scrollController.position.maxScrollExtent;
-      final currentScroll = _scrollController.offset;
-      if (maxScroll > 0) {
-        final newProgress = currentScroll / maxScroll;
-        if ((newProgress - _scrollProgress).abs() > 0.001) {
-          setState(() {
-            _scrollProgress = newProgress;
-          });
-        }
-        _currentPosition = currentScroll.toInt();
-        
-        // 更新当前章节
-        _updateCurrentChapter(currentScroll.toInt());
-        
-        // 防抖保存进度
-        _saveProgressDebounce?.cancel();
-        _saveProgressDebounce = Timer(const Duration(seconds: 2), _saveProgress);
+    if (!_scrollController.hasClients) return;
+    
+    final maxScroll = _scrollController.position.maxScrollExtent;
+    final currentScroll = _scrollController.offset;
+    
+    if (maxScroll > 0) {
+      final newProgress = currentScroll / maxScroll;
+      if ((newProgress - _scrollProgress).abs() > 0.001) {
+        setState(() {
+          _scrollProgress = newProgress;
+        });
       }
+      
+      // 计算当前字符位置（基于行索引）
+      _updateCurrentPositionFromScroll();
+      
+      // 更新当前章节
+      if (_currentPosition != null) {
+        _updateCurrentChapter(_currentPosition!);
+      }
+      
+      // 防抖保存进度
+      _saveProgressDebounce?.cancel();
+      _saveProgressDebounce = Timer(const Duration(seconds: 2), _saveProgress);
+    }
+  }
+  
+  void _updateCurrentPositionFromScroll() {
+    if (!_scrollController.hasClients || _lines.isEmpty) return;
+    
+    // 估算当前可见的第一行
+    final scrollOffset = _scrollController.offset;
+    final estimatedLineHeight = _fontSize * _lineHeight + 4; // 粗略估计
+    final firstVisibleLine = (scrollOffset / estimatedLineHeight).floor();
+    
+    if (firstVisibleLine >= 0 && firstVisibleLine < _lineStartIndices.length) {
+      _currentPosition = _lineStartIndices[firstVisibleLine];
     }
   }
 
@@ -147,6 +419,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       await _loadSettings();
       await _loadBookContent();
       await _loadProgress();
+      await _loadBookmarks();
     } catch (e) {
       setState(() {
         _errorMessage = '初始化失败: $e';
@@ -165,7 +438,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       _autoScrollEnabled = settings['autoScroll'] as bool;
       _scrollSpeed = settings['scrollSpeed'] as int;
       
-      // 翻页模式
       final pageModeStr = settings['pageMode'] as String? ?? 'scroll';
       _pageMode = PageMode.values.firstWhere(
         (m) => m.name == pageModeStr,
@@ -206,17 +478,43 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         final data = contentResponse.data as Map<String, dynamic>;
         final content = data['content'] as String?;
         
-        // 解析章节
         if (content != null) {
-          _parseChapters(content);
+          _contentLength = content.length;
+          
+          setState(() {
+            _content = content;
+            _isLoading = false;
+            _isParsing = true;
+          });
+          
+          // 大文件使用后台解析
+          if (_contentLength > _largeFileThreshold) {
+            debugPrint('大文件检测: ${(_contentLength / 1024 / 1024).toStringAsFixed(2)} MB，使用后台解析');
+            final result = await compute(_parseChaptersIsolate, content);
+            if (mounted) {
+              setState(() {
+                _chapters = result.chapters;
+                _lines = result.lines;
+                _lineStartIndices = result.lineStartIndices;
+                _isParsing = false;
+              });
+            }
+          } else {
+            // 小文件直接解析
+            final result = _parseChaptersIsolate(content);
+            setState(() {
+              _chapters = result.chapters;
+              _lines = result.lines;
+              _lineStartIndices = result.lineStartIndices;
+              _isParsing = false;
+            });
+          }
+          
           // 分页处理
           _paginateContent(content);
+        } else {
+          throw Exception('内容为空');
         }
-        
-        setState(() {
-          _content = content;
-          _isLoading = false;
-        });
       } else {
         throw Exception('无法加载内容');
       }
@@ -224,40 +522,9 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       setState(() {
         _errorMessage = '加载失败: $e';
         _isLoading = false;
+        _isParsing = false;
       });
     }
-  }
-
-  void _parseChapters(String content) {
-    final chapters = <Chapter>[];
-    
-    // 章节识别正则
-    final patterns = [
-      RegExp(r'^第[一二三四五六七八九十百千万零0-9]+[章节卷部回集篇].*', multiLine: true),
-      RegExp(r'^Chapter\s+\d+.*', multiLine: true, caseSensitive: false),
-      RegExp(r'^\d+[\.、]\s*.+', multiLine: true),
-    ];
-    
-    for (final pattern in patterns) {
-      final matches = pattern.allMatches(content);
-      for (final match in matches) {
-        chapters.add(Chapter(
-          title: match.group(0)!.trim(),
-          startIndex: match.start,
-        ));
-      }
-      if (chapters.isNotEmpty) break;
-    }
-    
-    // 按位置排序
-    chapters.sort((a, b) => a.startIndex.compareTo(b.startIndex));
-    
-    // 如果没有找到章节，创建一个默认章节
-    if (chapters.isEmpty) {
-      chapters.add(Chapter(title: '正文', startIndex: 0));
-    }
-    
-    _chapters = chapters;
   }
 
   void _paginateContent(String content) {
@@ -289,7 +556,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         if (position != null) {
           _savedPosition = int.tryParse(position);
           if (_savedPosition != null && _savedPosition! > 0) {
-            // 显示恢复进度确认
             _showRestoreProgressDialog();
           }
         }
@@ -302,12 +568,16 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   void _showRestoreProgressDialog() {
     if (!mounted) return;
     
+    final progressPercent = _content != null && _content!.isNotEmpty
+        ? ((_savedPosition! / _content!.length) * 100).toStringAsFixed(1)
+        : '0.0';
+    
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
         title: const Text('继续阅读'),
-        content: Text('检测到上次阅读进度 (${(_savedPosition! / 1000).toStringAsFixed(1)}k 字符处)，是否恢复？'),
+        content: Text('检测到上次阅读进度 ($progressPercent%)，是否恢复？'),
         actions: [
           TextButton(
             onPressed: () {
@@ -330,47 +600,40 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   void _restoreProgress() {
     if (_savedPosition == null) return;
-    
+    _jumpToPosition(_savedPosition!);
+    _progressRestored = true;
+    _showRestoredSnackBar();
+  }
+  
+  void _jumpToPosition(int position) {
     if (_pageMode == PageMode.scroll) {
-      if (!_scrollController.hasClients) {
-        // 延迟重试
-        SchedulerBinding.instance.addPostFrameCallback((_) {
-          Future.delayed(const Duration(milliseconds: 200), () {
-            if (mounted && _savedPosition != null) {
-              _restoreProgress();
-            }
-          });
-        });
-        return;
+      // 找到对应的行
+      int targetLine = 0;
+      for (int i = 0; i < _lineStartIndices.length; i++) {
+        if (_lineStartIndices[i] > position) {
+          targetLine = i > 0 ? i - 1 : 0;
+          break;
+        }
+        targetLine = i;
       }
       
-      setState(() {
-        _isRestoringProgress = true;
-      });
+      // 计算滚动位置
+      final estimatedLineHeight = _fontSize * _lineHeight + 4;
+      final targetScroll = targetLine * estimatedLineHeight;
       
-      // 等待内容渲染后跳转
       SchedulerBinding.instance.addPostFrameCallback((_) {
-        if (_scrollController.hasClients && _savedPosition != null) {
+        if (_scrollController.hasClients) {
           final maxScroll = _scrollController.position.maxScrollExtent;
-          final targetPosition = _savedPosition!.toDouble().clamp(0.0, maxScroll);
-          
-          _scrollController.jumpTo(targetPosition);
-          
-          setState(() {
-            _isRestoringProgress = false;
-            _progressRestored = true;
-          });
-          
-          _showRestoredSnackBar();
+          _scrollController.jumpTo(targetScroll.clamp(0.0, maxScroll));
         }
       });
     } else {
-      // 分页模式：根据位置计算页码
+      // 分页模式
       if (_content != null && _pages.isNotEmpty) {
         int charCount = 0;
         for (int i = 0; i < _pages.length; i++) {
           charCount += _pages[i].length;
-          if (charCount >= _savedPosition!) {
+          if (charCount >= position) {
             setState(() {
               _currentPage = i;
             });
@@ -379,9 +642,11 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           }
         }
       }
-      _progressRestored = true;
-      _showRestoredSnackBar();
     }
+    
+    // 更新当前章节
+    _updateCurrentChapter(position);
+    _currentPosition = position;
   }
 
   void _showRestoredSnackBar() {
@@ -417,38 +682,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   void _jumpToChapter(Chapter chapter) {
-    if (_pageMode == PageMode.scroll) {
-      if (!_scrollController.hasClients || _content == null) return;
-      
-      // 计算大概的滚动位置（基于字符索引估算）
-      final totalLength = _content!.length;
-      final maxScroll = _scrollController.position.maxScrollExtent;
-      final estimatedPosition = (chapter.startIndex / totalLength) * maxScroll;
-      
-      _scrollController.animateTo(
-        estimatedPosition.clamp(0.0, maxScroll),
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
-    } else {
-      // 分页模式：找到章节所在页
-      int charCount = 0;
-      for (int i = 0; i < _pages.length; i++) {
-        charCount += _pages[i].length;
-        if (charCount >= chapter.startIndex) {
-          _pageController.animateToPage(
-            i,
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOut,
-          );
-          setState(() {
-            _currentPage = i;
-          });
-          break;
-        }
-      }
-    }
-    
+    _jumpToPosition(chapter.startIndex);
     setState(() {
       _showChapters = false;
     });
@@ -479,7 +713,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   // 翻页
   void _previousPage() {
     if (_pageMode == PageMode.scroll) {
-      // 滚动模式：向上滚动一屏
       final viewHeight = MediaQuery.of(context).size.height - 150;
       final newPosition = (_scrollController.offset - viewHeight).clamp(0.0, _scrollController.position.maxScrollExtent);
       _scrollController.animateTo(
@@ -488,7 +721,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         curve: Curves.easeOut,
       );
     } else {
-      // 分页模式
       if (_currentPage > 0) {
         _pageController.previousPage(
           duration: const Duration(milliseconds: 300),
@@ -500,7 +732,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   void _nextPage() {
     if (_pageMode == PageMode.scroll) {
-      // 滚动模式：向下滚动一屏
       final viewHeight = MediaQuery.of(context).size.height - 150;
       final newPosition = (_scrollController.offset + viewHeight).clamp(0.0, _scrollController.position.maxScrollExtent);
       _scrollController.animateTo(
@@ -509,7 +740,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         curve: Curves.easeOut,
       );
     } else {
-      // 分页模式
       if (_currentPage < _pages.length - 1) {
         _pageController.nextPage(
           duration: const Duration(milliseconds: 300),
@@ -524,7 +754,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     final screenWidth = MediaQuery.of(context).size.width;
     final x = details.globalPosition.dx;
     
-    // 中间区域点击显示/隐藏控件
     if (x > screenWidth * 0.3 && x < screenWidth * 0.7) {
       setState(() {
         _showControls = !_showControls;
@@ -532,7 +761,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       return;
     }
     
-    // 点击翻页模式才响应左右翻页
     if (_pageMode == PageMode.tap) {
       if (x < screenWidth * 0.3) {
         _previousPage();
@@ -558,18 +786,15 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   void _startAutoScroll() {
     _autoScrollTimer?.cancel();
     
-    // 每50ms滚动一次
     _autoScrollTimer = Timer.periodic(const Duration(milliseconds: 50), (_) {
       if (_scrollController.hasClients && _autoScrollEnabled) {
         final maxScroll = _scrollController.position.maxScrollExtent;
         final currentScroll = _scrollController.offset;
         
         if (currentScroll < maxScroll) {
-          // 速度映射：1-10 -> 0.5-5.0 像素/50ms
           final speed = 0.5 + (_scrollSpeed - 1) * 0.5;
           _scrollController.jumpTo(currentScroll + speed);
         } else {
-          // 到达底部，停止滚动
           _toggleAutoScroll();
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('已到达底部')),
@@ -648,22 +873,23 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           },
         ),
         actions: [
-          // 进度显示
-          Center(
-            child: Padding(
-              padding: const EdgeInsets.only(right: 8.0),
-              child: Text(
-                _pageMode == PageMode.scroll 
-                  ? '${(_scrollProgress * 100).toInt()}%'
-                  : '${_currentPage + 1}/${_pages.length}',
-                style: TextStyle(
-                  color: _textColor.withOpacity(0.7),
-                  fontSize: 14,
-                ),
-              ),
-            ),
+          IconButton(
+            icon: const Icon(Icons.bookmark_add),
+            tooltip: '添加书签',
+            onPressed: _addBookmark,
           ),
-          // 目录按钮
+          IconButton(
+            icon: const Icon(Icons.bookmarks),
+            tooltip: '书签列表',
+            onPressed: () {
+              _loadBookmarks();
+              setState(() {
+                _showBookmarks = !_showBookmarks;
+                _showChapters = false;
+                _showSettings = false;
+              });
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.list),
             tooltip: '目录',
@@ -671,17 +897,16 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
               setState(() {
                 _showChapters = !_showChapters;
                 _showSettings = false;
+                _showBookmarks = false;
               });
             },
           ),
-          // 自动滚动按钮（仅滚动模式）
           if (_pageMode == PageMode.scroll)
             IconButton(
               icon: Icon(_autoScrollEnabled ? Icons.pause : Icons.play_arrow),
               tooltip: _autoScrollEnabled ? '停止自动滚动' : '自动滚动',
               onPressed: _toggleAutoScroll,
             ),
-          // 设置按钮
           IconButton(
             icon: const Icon(Icons.settings),
             tooltip: '阅读设置',
@@ -689,6 +914,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
               setState(() {
                 _showSettings = !_showSettings;
                 _showChapters = false;
+                _showBookmarks = false;
               });
             },
           ),
@@ -696,7 +922,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       ) : null,
       body: Stack(
         children: [
-          // 主要内容
           GestureDetector(
             onTapUp: _handleTap,
             onHorizontalDragEnd: _pageMode == PageMode.slide ? (details) {
@@ -709,13 +934,10 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             child: _buildMainContent(),
           ),
           
-          // 章节目录面板
           if (_showChapters) _buildChaptersPanel(),
-          
-          // 设置面板
+          if (_showBookmarks) _buildBookmarksPanel(),
           if (_showSettings) _buildSettingsPanel(),
           
-          // 进度恢复中指示器
           if (_isRestoringProgress)
             Container(
               color: Colors.black54,
@@ -731,7 +953,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
               ),
             ),
           
-          // 底部进度条和导航按钮
           if (_showControls)
             Positioned(
               left: 0,
@@ -743,7 +964,35 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // 进度条
+                    // 状态信息栏
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          _currentTime,
+                          style: TextStyle(
+                            color: _textColor.withOpacity(0.6),
+                            fontSize: 12,
+                          ),
+                        ),
+                        if (_contentLength > _largeFileThreshold)
+                          Text(
+                            '${(_contentLength / 1024 / 1024).toStringAsFixed(1)} MB',
+                            style: TextStyle(
+                              color: _textColor.withOpacity(0.4),
+                              fontSize: 10,
+                            ),
+                          ),
+                        Text(
+                          '${(_scrollProgress * 100).toStringAsFixed(1)}%',
+                          style: TextStyle(
+                            color: _textColor.withOpacity(0.6),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
                     LinearProgressIndicator(
                       value: _pageMode == PageMode.scroll 
                         ? _scrollProgress 
@@ -755,29 +1004,28 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                       minHeight: 3,
                     ),
                     const SizedBox(height: 8),
-                    // 导航按钮
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: [
                         TextButton.icon(
                           onPressed: _previousChapter,
-                          icon: Icon(Icons.skip_previous, color: _textColor),
-                          label: Text('上一章', style: TextStyle(color: _textColor)),
+                          icon: Icon(Icons.skip_previous, color: _textColor, size: 20),
+                          label: Text('上一章', style: TextStyle(color: _textColor, fontSize: 12)),
                         ),
                         TextButton.icon(
                           onPressed: _previousPage,
-                          icon: Icon(Icons.chevron_left, color: _textColor),
-                          label: Text('上一页', style: TextStyle(color: _textColor)),
+                          icon: Icon(Icons.chevron_left, color: _textColor, size: 20),
+                          label: Text('上一页', style: TextStyle(color: _textColor, fontSize: 12)),
                         ),
                         TextButton.icon(
                           onPressed: _nextPage,
-                          icon: Icon(Icons.chevron_right, color: _textColor),
-                          label: Text('下一页', style: TextStyle(color: _textColor)),
+                          icon: Icon(Icons.chevron_right, color: _textColor, size: 20),
+                          label: Text('下一页', style: TextStyle(color: _textColor, fontSize: 12)),
                         ),
                         TextButton.icon(
                           onPressed: _nextChapter,
-                          icon: Icon(Icons.skip_next, color: _textColor),
-                          label: Text('下一章', style: TextStyle(color: _textColor)),
+                          icon: Icon(Icons.skip_next, color: _textColor, size: 20),
+                          label: Text('下一章', style: TextStyle(color: _textColor, fontSize: 12)),
                         ),
                       ],
                     ),
@@ -786,7 +1034,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
               ),
             ),
           
-          // 点击翻页提示（点击模式时）
           if (_pageMode == PageMode.tap && _showControls)
             Positioned(
               top: 80,
@@ -825,6 +1072,24 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       );
     }
     
+    if (_isParsing) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(color: _textColor),
+            const SizedBox(height: 16),
+            Text('正在解析章节...', style: TextStyle(color: _textColor)),
+            const SizedBox(height: 8),
+            Text(
+              '文件较大 (${(_contentLength / 1024 / 1024).toStringAsFixed(1)} MB)',
+              style: TextStyle(color: _textColor.withOpacity(0.6), fontSize: 12),
+            ),
+          ],
+        ),
+      );
+    }
+    
     if (_errorMessage != null) {
       return Center(
         child: Column(
@@ -844,27 +1109,52 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     }
     
     if (_pageMode == PageMode.scroll) {
-      return _buildScrollContent();
+      return _buildVirtualScrollContent();
     } else {
       return _buildPagedContent();
     }
   }
 
-  Widget _buildScrollContent() {
-    if (_content == null) return const SizedBox();
+  /// 使用 ListView.builder 实现虚拟滚动，解决大文件性能问题
+  Widget _buildVirtualScrollContent() {
+    if (_lines.isEmpty) return const SizedBox();
 
-    return SingleChildScrollView(
+    return ListView.builder(
       controller: _scrollController,
       padding: EdgeInsets.fromLTRB(20, 16, 20, _showControls ? 100 : 16),
-      child: SelectableText(
-        _content!,
-        style: TextStyle(
-          color: _textColor,
-          fontSize: _fontSize,
-          height: _lineHeight,
-          fontFamily: _fontFamily == 'default' ? null : _fontFamily,
-        ),
-      ),
+      itemCount: _lines.length,
+      // 增加缓存区域以提高滚动流畅度
+      cacheExtent: 2000,
+      itemBuilder: (context, index) {
+        final line = _lines[index];
+        
+        // 检查是否是章节标题
+        final isChapterTitle = _chapters.any((c) => 
+          c.startIndex >= _lineStartIndices[index] && 
+          c.startIndex < (_lineStartIndices.length > index + 1 
+            ? _lineStartIndices[index + 1] 
+            : _lineStartIndices[index] + line.length + 1)
+        );
+        
+        // 空行处理
+        if (line.trim().isEmpty) {
+          return SizedBox(height: _fontSize * _lineHeight * 0.5);
+        }
+        
+        return Padding(
+          padding: EdgeInsets.only(bottom: _fontSize * (_lineHeight - 1)),
+          child: Text(
+            line,
+            style: TextStyle(
+              color: _textColor,
+              fontSize: isChapterTitle ? _fontSize * 1.2 : _fontSize,
+              height: _lineHeight,
+              fontWeight: isChapterTitle ? FontWeight.bold : FontWeight.normal,
+              fontFamily: _fontFamily == 'default' ? null : _fontFamily,
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -879,17 +1169,17 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
           _currentPage = page;
           _scrollProgress = (page + 1) / _pages.length;
         });
-        // 更新章节
         int charCount = 0;
         for (int i = 0; i <= page && i < _pages.length; i++) {
           charCount += _pages[i].length;
         }
         _updateCurrentChapter(charCount);
+        _currentPosition = charCount;
       },
       itemBuilder: (context, index) {
         return SingleChildScrollView(
           padding: EdgeInsets.fromLTRB(20, 16, 20, _showControls ? 100 : 16),
-          child: SelectableText(
+          child: Text(
             _pages[index],
             style: TextStyle(
               color: _textColor,
@@ -903,7 +1193,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     );
   }
 
-  Widget _buildChaptersPanel() {
+  Widget _buildBookmarksPanel() {
     return Positioned(
       top: 0,
       left: 0,
@@ -912,7 +1202,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
         elevation: 8,
         color: _theme == 'dark' ? const Color(0xFF1A1A1A) : Colors.white,
         child: SizedBox(
-          width: 280,
+          width: 300,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -922,12 +1212,112 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                      '目录 (${_chapters.length}章)',
+                      '书签 (${_bookmarks.length})',
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
                         color: _textColor,
                       ),
+                    ),
+                    IconButton(
+                      icon: Icon(Icons.close, color: _textColor),
+                      onPressed: () => setState(() => _showBookmarks = false),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: _bookmarks.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.bookmark_border, size: 48, color: _textColor.withOpacity(0.3)),
+                            const SizedBox(height: 8),
+                            Text('暂无书签', style: TextStyle(color: _textColor.withOpacity(0.5))),
+                          ],
+                        ),
+                      )
+                    : ListView.builder(
+                        itemCount: _bookmarks.length,
+                        itemBuilder: (context, index) {
+                          final bookmark = _bookmarks[index];
+                          return Dismissible(
+                            key: Key('bookmark_${bookmark.id}'),
+                            direction: DismissDirection.endToStart,
+                            background: Container(
+                              color: Colors.red,
+                              alignment: Alignment.centerRight,
+                              padding: const EdgeInsets.only(right: 16),
+                              child: const Icon(Icons.delete, color: Colors.white),
+                            ),
+                            onDismissed: (_) => _deleteBookmark(bookmark.id),
+                            child: ListTile(
+                              title: Text(
+                                bookmark.chapterTitle ?? '位置 ${bookmark.position}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(color: _textColor),
+                              ),
+                              subtitle: Text(
+                                DateFormat('yyyy-MM-dd HH:mm').format(bookmark.createdAt),
+                                style: TextStyle(
+                                  color: _textColor.withOpacity(0.5),
+                                  fontSize: 12,
+                                ),
+                              ),
+                              leading: Icon(Icons.bookmark, color: Theme.of(context).primaryColor),
+                              onTap: () => _jumpToBookmark(bookmark),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChaptersPanel() {
+    return Positioned(
+      top: 0,
+      left: 0,
+      bottom: 0,
+      child: Material(
+        elevation: 8,
+        color: _theme == 'dark' ? const Color(0xFF1A1A1A) : Colors.white,
+        child: SizedBox(
+          width: 320,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '目录',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: _textColor,
+                          ),
+                        ),
+                        Text(
+                          '共 ${_chapters.length} 章',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: _textColor.withOpacity(0.6),
+                          ),
+                        ),
+                      ],
                     ),
                     IconButton(
                       icon: Icon(Icons.close, color: _textColor),
@@ -947,7 +1337,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                     return ListTile(
                       title: Text(
                         chapter.title,
-                        maxLines: 1,
+                        maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: isCurrentChapter 
@@ -956,11 +1346,19 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                           fontWeight: isCurrentChapter 
                             ? FontWeight.bold 
                             : FontWeight.normal,
+                          fontSize: 14,
                         ),
                       ),
                       leading: isCurrentChapter 
-                        ? Icon(Icons.bookmark, color: Theme.of(context).primaryColor)
-                        : Icon(Icons.bookmark_border, color: _textColor.withOpacity(0.5)),
+                        ? Icon(Icons.bookmark, color: Theme.of(context).primaryColor, size: 20)
+                        : Text(
+                            '${index + 1}',
+                            style: TextStyle(
+                              color: _textColor.withOpacity(0.4),
+                              fontSize: 12,
+                            ),
+                          ),
+                      dense: true,
                       onTap: () => _jumpToChapter(chapter),
                     );
                   },
@@ -1090,6 +1488,13 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                 
                 const SizedBox(height: 16),
                 
+                // 字体选择
+                Text('字体', style: TextStyle(color: _textColor.withOpacity(0.7))),
+                const SizedBox(height: 8),
+                _buildFontSelector(),
+                
+                const SizedBox(height: 16),
+                
                 // 主题
                 Text('阅读主题', style: TextStyle(color: _textColor.withOpacity(0.7))),
                 const SizedBox(height: 8),
@@ -1105,7 +1510,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                 
                 const SizedBox(height: 16),
                 
-                // 自动滚动速度（仅滚动模式）
                 if (_pageMode == PageMode.scroll) ...[
                   Text('自动滚动速度', style: TextStyle(color: _textColor.withOpacity(0.7))),
                   Slider(
@@ -1163,6 +1567,107 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildFontSelector() {
+    final currentFont = availableFonts.firstWhere(
+      (f) => f.name == _fontFamily,
+      orElse: () => availableFonts.first,
+    );
+    
+    return GestureDetector(
+      onTap: () {
+        _showFontPickerDialog();
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: _textColor.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: _textColor.withOpacity(0.2)),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  currentFont.displayName,
+                  style: TextStyle(
+                    color: _textColor,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  currentFont.preview ?? '',
+                  style: TextStyle(
+                    color: _textColor.withOpacity(0.6),
+                    fontSize: 12,
+                    fontFamily: currentFont.name == 'default' ? null : currentFont.name,
+                  ),
+                ),
+              ],
+            ),
+            Icon(Icons.arrow_drop_down, color: _textColor),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  void _showFontPickerDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: _theme == 'dark' ? const Color(0xFF1A1A1A) : Colors.white,
+        title: Text('选择字体', style: TextStyle(color: _textColor)),
+        content: SizedBox(
+          width: 300,
+          height: 400,
+          child: ListView.builder(
+            itemCount: availableFonts.length,
+            itemBuilder: (context, index) {
+              final font = availableFonts[index];
+              final isSelected = font.name == _fontFamily;
+              
+              return ListTile(
+                title: Text(
+                  font.displayName,
+                  style: TextStyle(
+                    color: isSelected ? Theme.of(context).primaryColor : _textColor,
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                  ),
+                ),
+                subtitle: Text(
+                  font.preview ?? '',
+                  style: TextStyle(
+                    color: _textColor.withOpacity(0.6),
+                    fontFamily: font.name == 'default' ? null : font.name,
+                  ),
+                ),
+                leading: Icon(
+                  isSelected ? Icons.check_circle : Icons.circle_outlined,
+                  color: isSelected ? Theme.of(context).primaryColor : _textColor.withOpacity(0.3),
+                ),
+                onTap: () {
+                  setState(() => _fontFamily = font.name);
+                  Navigator.pop(context);
+                },
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+        ],
       ),
     );
   }
