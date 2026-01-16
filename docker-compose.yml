@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   novel-library:
-    build: .
+    image: ghcr.io/haruka041/novel-library:latest
     container_name: novel-library
     ports:
       - "8080:8080"
