@@ -1,8 +1,8 @@
 import { Box, Card, CardContent, Typography, Skeleton, Chip } from '@mui/material'
+import MenuBookIcon from '@mui/icons-material/MenuBook'
 import { useNavigate } from 'react-router-dom'
 import { useState } from 'react'
 import { BookSummary } from '../types'
-import { useSettingsStore } from '../stores/settingsStore'
 
 interface BookCardProps {
   book?: BookSummary
@@ -10,10 +10,10 @@ interface BookCardProps {
   onClick?: () => void
 }
 
-// Material Design 颜色方案（柔和的纯色）
+// Material Design 纯色方案
 const COVER_COLORS = [
   '#5C6BC0', // 靛蓝
-  '#AB47BC', // 紫色
+  '#AB47BC', // 紫色  
   '#EC407A', // 粉色
   '#EF5350', // 红色
   '#FF7043', // 深橙
@@ -27,15 +27,12 @@ const COVER_COLORS = [
 // 根据标题选择颜色
 const getCoverColor = (title: string): string => {
   let hash = 0
-  // 确保正确处理UTF-8编码的中文字符
-  const titleStr = String(title || '?')
+  const titleStr = String(title || '')
   for (let i = 0; i < titleStr.length; i++) {
-    const char = titleStr.charCodeAt(i)
-    hash = ((hash << 5) - hash) + char
-    hash = hash & hash // Convert to 32bit integer
+    hash = ((hash << 5) - hash) + titleStr.charCodeAt(i)
+    hash = hash & hash
   }
-  const index = Math.abs(hash) % COVER_COLORS.length
-  return COVER_COLORS[index]
+  return COVER_COLORS[Math.abs(hash) % COVER_COLORS.length]
 }
 
 export default function BookCard({ book, loading = false, onClick }: BookCardProps) {
@@ -66,22 +63,6 @@ export default function BookCard({ book, loading = false, onClick }: BookCardPro
 
   const showFallback = !book.cover_url || imageError
 
-  // 获取书名首字作为封面文字
-  const getFirstChar = (title: string): string => {
-    if (!title) return '📖'
-    // 确保正确处理UTF-8编码
-    const titleStr = String(title).trim()
-    if (!titleStr) return '📖'
-    
-    // 优先取中文字符
-    const chineseMatch = titleStr.match(/[\u4e00-\u9fff]/)
-    if (chineseMatch) return chineseMatch[0]
-    
-    // 否则取第一个非空白字符
-    const firstChar = titleStr.charAt(0)
-    return /[a-zA-Z]/.test(firstChar) ? firstChar.toUpperCase() : firstChar
-  }
-
   return (
     <Card
       sx={{
@@ -104,7 +85,7 @@ export default function BookCard({ book, loading = false, onClick }: BookCardPro
         }}
       >
         {showFallback ? (
-          // 渐变封面 + 文字
+          // 纯色背景 + 图标 + 书名
           <Box
             sx={{
               width: '100%',
@@ -114,46 +95,35 @@ export default function BookCard({ book, loading = false, onClick }: BookCardPro
               flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
-              padding: 2,
+              p: 2,
             }}
           >
-            {/* 大字符 */}
-            <Typography
-              component="div"
+            {/* 书籍图标 */}
+            <MenuBookIcon
               sx={{
-                fontSize: { xs: '5rem', sm: '6rem' },
-                fontWeight: 700,
-                color: 'rgba(255,255,255,0.95)',
-                textShadow: '0 2px 8px rgba(0,0,0,0.2)',
-                mb: 1,
-                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans SC", "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif',
-                lineHeight: 1,
-                userSelect: 'none',
+                fontSize: { xs: 64, sm: 80 },
+                color: 'rgba(255, 255, 255, 0.9)',
+                mb: 2,
               }}
-            >
-              {getFirstChar(book.title)}
-            </Typography>
+            />
             {/* 书名 */}
             <Typography
-              component="div"
               sx={{
-                fontSize: { xs: '0.8rem', sm: '0.9rem' },
-                color: 'rgba(255,255,255,0.9)',
+                fontSize: { xs: '0.85rem', sm: '0.95rem' },
+                fontWeight: 500,
+                color: 'rgba(255, 255, 255, 0.95)',
                 textAlign: 'center',
-                textShadow: '0 1px 3px rgba(0,0,0,0.3)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 display: '-webkit-box',
-                WebkitLineClamp: 2,
+                WebkitLineClamp: 3,
                 WebkitBoxOrient: 'vertical',
                 lineHeight: 1.4,
-                fontWeight: 500,
-                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans SC", "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif',
                 px: 1,
-                userSelect: 'none',
+                width: '100%',
               }}
             >
-              {String(book.title || '')}
+              {book.title}
             </Typography>
           </Box>
         ) : (
