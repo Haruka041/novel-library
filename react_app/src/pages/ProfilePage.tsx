@@ -1,19 +1,27 @@
-import { Box, Typography, Card, CardContent, Avatar, Divider, List, ListItem, ListItemIcon, ListItemText, ToggleButtonGroup, ToggleButton, Chip } from '@mui/material'
-import { Person, Lock, History, Favorite, DarkMode, LightMode, SettingsBrightness, Logout, PhotoSizeSelectLarge, ViewList, AllInclusive } from '@mui/icons-material'
+import { Box, Typography, Card, CardContent, Avatar, Divider, List, ListItem, ListItemIcon, ListItemText, ToggleButtonGroup, ToggleButton, Chip, Button, IconButton, CircularProgress, Snackbar, Alert } from '@mui/material'
+import { Person, Lock, History, Favorite, DarkMode, LightMode, SettingsBrightness, Logout, PhotoSizeSelectLarge, ViewList, AllInclusive, Palette, Image, Check } from '@mui/icons-material'
 import { useAuthStore } from '../stores/authStore'
-import { useThemeStore } from '../stores/themeStore'
+import { useThemeStore, PRESET_COLORS } from '../stores/themeStore'
 import { useSettingsStore } from '../stores/settingsStore'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
+import { extractDominantColor } from '../utils/colorUtils'
 
 export default function ProfilePage() {
   const { user, logout } = useAuthStore()
-  const { preference, setPreference } = useThemeStore()
+  const { preference, setPreference, primaryColor, setPrimaryColor } = useThemeStore()
   const { coverSize, setCoverSize, paginationMode, setPaginationMode } = useSettingsStore()
   const navigate = useNavigate()
   const [favoriteCount, setFavoriteCount] = useState(0)
   const [historyCount, setHistoryCount] = useState(0)
+  const [extracting, setExtracting] = useState(false)
+  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
+    open: false,
+    message: '',
+    severity: 'success'
+  })
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // 获取统计数据
   useEffect(() => {
@@ -32,6 +40,30 @@ export default function ProfilePage() {
     }
     fetchStats()
   }, [])
+
+  // 从图片提取颜色
+  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    setExtracting(true)
+    try {
+      const imageUrl = URL.createObjectURL(file)
+      const color = await extractDominantColor(imageUrl)
+      setPrimaryColor(color)
+      URL.revokeObjectURL(imageUrl)
+      setSnackbar({ open: true, message: `已提取主题色: ${color}`, severity: 'success' })
+    } catch (error) {
+      console.error('提取颜色失败:', error)
+      setSnackbar({ open: true, message: '提取颜色失败，请尝试其他图片', severity: 'error' })
+    } finally {
+      setExtracting(false)
+      // 清空 input 以便可以再次选择同一文件
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
+    }
+  }
 
   return (
     <Box sx={{ p: 3 }}>
@@ -61,7 +93,7 @@ export default function ProfilePage() {
             显示设置
           </Typography>
           
-          {/* 主题设置 */}
+          {/* 主题模式 */}
           <Box sx={{ mb: 3 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 1.5 }}>
               <SettingsBrightness sx={{ mr: 1, color: 'text.secondary' }} />
@@ -87,6 +119,79 @@ export default function ProfilePage() {
                 跟随系统
               </ToggleButton>
             </ToggleButtonGroup>
+          </Box>
+          
+          <Divider sx={{ my: 2 }} />
+          
+          {/* 主题色设置 */}
+          <Box sx={{ mb: 3 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 1.5 }}>
+              <Palette sx={{ mr: 1, color: 'text.secondary' }} />
+              <Typography variant="body1">主题色</Typography>
+            </Box>
+            
+            {/* 预设颜色选择 */}
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
+              {PRESET_COLORS.map((preset) => (
+                <IconButton
+                  key={preset.color}
+                  onClick={() => setPrimaryColor(preset.color)}
+                  sx={{
+                    width: 40,
+                    height: 40,
+                    bgcolor: preset.color,
+                    border: primaryColor === preset.color ? '3px solid' : '1px solid',
+                    borderColor: primaryColor === preset.color ? 'white' : 'rgba(0,0,0,0.2)',
+                    '&:hover': {
+                      bgcolor: preset.color,
+                      opacity: 0.9,
+                    },
+                  }}
+                  title={preset.name}
+                >
+                  {primaryColor === preset.color && (
+                    <Check sx={{ color: 'white', fontSize: 20 }} />
+                  )}
+                </IconButton>
+              ))}
+            </Box>
+            
+            {/* 从图片提取颜色 */}
+            <input
+              type="file"
+              accept="image/*"
+              ref={fileInputRef}
+              onChange={handleImageUpload}
+              style={{ display: 'none' }}
+            />
+            <Button
+              variant="outlined"
+              startIcon={extracting ? <CircularProgress size={16} /> : <Image />}
+              onClick={() => fileInputRef.current?.click()}
+              disabled={extracting}
+              size="small"
+            >
+              {extracting ? '提取中...' : '从图片提取颜色'}
+            </Button>
+            
+            {/* 当前颜色预览 */}
+            <Box sx={{ display: 'flex', alignItems: 'center', mt: 1.5, gap: 1 }}>
+              <Typography variant="caption" color="text.secondary">
+                当前主题色:
+              </Typography>
+              <Box
+                sx={{
+                  width: 20,
+                  height: 20,
+                  bgcolor: primaryColor,
+                  borderRadius: '50%',
+                  border: '1px solid rgba(0,0,0,0.2)',
+                }}
+              />
+              <Typography variant="caption" color="text.secondary">
+                {primaryColor}
+              </Typography>
+            </Box>
           </Box>
           
           <Divider sx={{ my: 2 }} />
@@ -181,6 +286,18 @@ export default function ProfilePage() {
           </ListItem>
         </List>
       </Card>
+
+      {/* Snackbar 提示 */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={3000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert severity={snackbar.severity} onClose={() => setSnackbar({ ...snackbar, open: false })}>
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   )
 }

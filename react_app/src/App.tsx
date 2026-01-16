@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { ThemeProvider, createTheme, CssBaseline } from '@mui/material'
 import { useAuthStore } from './stores/authStore'
@@ -35,6 +35,7 @@ const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
 
 function App() {
   const mode = useThemeStore((state) => state.mode)
+  const primaryColor = useThemeStore((state) => state.primaryColor)
   const initSystemListener = useThemeStore((state) => state.initSystemListener)
   const checkAuth = useAuthStore((state) => state.checkAuth)
 
@@ -49,11 +50,12 @@ function App() {
     return cleanup
   }, [initSystemListener])
 
-  const theme = createTheme({
+  // 使用 useMemo 创建主题，当 mode 或 primaryColor 变化时重新创建
+  const theme = useMemo(() => createTheme({
     palette: {
       mode: mode,
       primary: {
-        main: '#1976d2',
+        main: primaryColor,
       },
       secondary: {
         main: '#ff9800',
@@ -82,7 +84,7 @@ function App() {
         },
       },
     },
-  })
+  }), [mode, primaryColor])
 
   return (
     <ThemeProvider theme={theme}>

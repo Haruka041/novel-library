@@ -1,8 +1,10 @@
 import { Box, Card, CardContent, Typography, Skeleton, Chip } from '@mui/material'
 import MenuBookIcon from '@mui/icons-material/MenuBook'
 import { useNavigate } from 'react-router-dom'
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { BookSummary } from '../types'
+import { usePrimaryColor } from '../stores/themeStore'
+import { generateMorandiPalette } from '../utils/colorUtils'
 
 interface BookCardProps {
   book?: BookSummary
@@ -10,34 +12,24 @@ interface BookCardProps {
   onClick?: () => void
 }
 
-// 柔和的莫兰迪色调
-const COVER_COLORS = [
-  '#7B8FA1', // 雾霾蓝
-  '#A5B4C4', // 浅灰蓝
-  '#8F9FA9', // 灰蓝
-  '#9DACB7', // 雾灰
-  '#87A2B2', // 暮蓝
-  '#A0B1BA', // 银灰蓝
-  '#829AA8', // 石灰蓝
-  '#94A4AB', // 莫兰迪灰
-  '#7E929E', // 青灰
-  '#8DA1AD', // 铅蓝
-]
-
-// 根据标题选择颜色
-const getCoverColor = (title: string): string => {
+// 根据标题选择颜色索引
+const getColorIndex = (title: string): number => {
   let hash = 0
   const titleStr = String(title || '')
   for (let i = 0; i < titleStr.length; i++) {
     hash = ((hash << 5) - hash) + titleStr.charCodeAt(i)
     hash = hash & hash
   }
-  return COVER_COLORS[Math.abs(hash) % COVER_COLORS.length]
+  return Math.abs(hash) % 6
 }
 
 export default function BookCard({ book, loading = false, onClick }: BookCardProps) {
   const navigate = useNavigate()
   const [imageError, setImageError] = useState(false)
+  const primaryColor = usePrimaryColor()
+  
+  // 根据主题色生成莫兰迪调色板
+  const morandiPalette = useMemo(() => generateMorandiPalette(primaryColor), [primaryColor])
 
   if (loading) {
     return (
@@ -62,6 +54,7 @@ export default function BookCard({ book, loading = false, onClick }: BookCardPro
   }
 
   const showFallback = !book.cover_url || imageError
+  const coverColor = morandiPalette[getColorIndex(book.title)]
 
   return (
     <Card
@@ -85,12 +78,12 @@ export default function BookCard({ book, loading = false, onClick }: BookCardPro
         }}
       >
         {showFallback ? (
-          // 纯色背景 + 图标 + 书名
+          // 主题色莫兰迪风格背景 + 图标 + 书名
           <Box
             sx={{
               width: '100%',
               height: '100%',
-              bgcolor: getCoverColor(book.title),
+              bgcolor: coverColor,
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
