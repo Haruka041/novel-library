@@ -23,6 +23,7 @@ class BookDetailScreen extends StatefulWidget {
 class _BookDetailScreenState extends State<BookDetailScreen> {
   late BookService _bookService;
   late ApiClient _apiClient;
+  late StorageService _storage;
   Book? _book;
   bool _isLoading = true;
   String? _errorMessage;
@@ -40,9 +41,9 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
   }
 
   Future<void> _initService() async {
-    final storage = StorageService();
-    await storage.init();
-    _apiClient = ApiClient(storage);
+    _storage = StorageService();
+    await _storage.init();
+    _apiClient = ApiClient(_storage);
     _bookService = BookService(_apiClient);
     await _loadBookDetail();
     await _loadReadingProgress();
@@ -152,8 +153,21 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
     }
   }
 
-  void _downloadBook() {
-    final downloadUrl = '${ApiConfig.baseUrl}/books/${widget.bookId}/download';
+  Future<void> _downloadBook() async {
+    // 获取 token
+    final token = await _storage.getToken();
+    if (token == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('请先登录')),
+        );
+      }
+      return;
+    }
+    
+    // 添加 token 参数
+    final downloadUrl = '${ApiConfig.baseUrl}/books/${widget.bookId}/download?token=$token';
+    
     // 使用条件导入的平台实现
     platform.openUrl(downloadUrl);
     

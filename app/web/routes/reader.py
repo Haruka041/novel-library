@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Header, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -92,13 +92,54 @@ async def _read_txt_content(file_path: Path) -> dict:
 
 @router.get("/books/{book_id}/download")
 async def download_book(
-    book: Book = Depends(get_accessible_book),
-    current_user: User = Depends(get_current_user)
+    book_id: int,
+    token: str = Query(None, description="JWT Token（可选，用于不支持 Header 的场景）"),
+    db: AsyncSession = Depends(get_db)
 ):
     """
     下载书籍原始文件
-    需要有书籍访问权限
+    支持两种认证方式:
+    1. Authorization Header (优先)
+    2. URL 参数 ?token=xxx (用于浏览器直接下载)
     """
+    from fastapi import Request
+    from app.web.routes.auth import decode_token
+    from app.utils.permissions import check_book_access
+    
+    # 获取 token - 优先从 URL 参数获取
+    if not token:
+        raise HTTPException(status_code=401, detail="需要认证，请在 URL 中添加 ?token=xxx")
+    
+    # 验证 token
+    try:
+        payload = decode_token(token)
+        username = payload.get("sub")
+        if not username:
+            raise HTTPException(status_code=401, detail="无效的 token")
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Token 验证失败: {str(e)}")
+    
+    # 获取用户
+    result = await db.execute(
+        select(User).where(User.username == username)
+    )
+    current_user = result.scalar_one_or_none()
+    
+    if not current_user:
+        raise HTTPException(status_code=401, detail="用户不存在")
+    
+    # 获取书籍
+    result = await db.execute(
+        select(Book).where(Book.id == book_id)
+    )
+    book = result.scalar_one_or_none()
+    
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    
+    # 检查权限
+    if not await check_book_access(current_user, book_id, db):
+        raise HTTPException(status_code=403, detail="无权访问此书籍")
     
     file_path = Path(book.file_path)
     if not file_path.exists():
