@@ -21,6 +21,7 @@ import 'screens/admin/backup_screen.dart';
 import 'screens/admin/covers_screen.dart';
 import 'screens/admin/libraries_screen.dart';
 import 'screens/admin/users_screen.dart';
+import 'screens/profile_screen.dart' show FavoritesScreen;
 
 void main() {
   // 使用路径URL策略（不带#的干净URL）
@@ -177,6 +178,10 @@ class MyApp extends StatelessWidget {
         GoRoute(
           path: '/admin/users',
           builder: (context, state) => const UsersScreen(),
+        ),
+        GoRoute(
+          path: '/favorites',
+          builder: (context, state) => const FavoritesScreen(),
         ),
       ],
     );

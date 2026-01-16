@@ -178,14 +178,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             icon: Icons.favorite,
             title: '我的收藏',
             subtitle: '$_favoriteCount 本书籍',
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const FavoritesScreen(),
-                ),
-              );
-            },
+            onTap: () => context.push('/favorites'),
           ),
 
           const Divider(),
@@ -536,7 +529,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
                               onPressed: () => _removeFavorite(bookId),
                             ),
                             onTap: () {
-                              context.push('/books/$bookId');
+                              context.push('/book/$bookId');
                             },
                           );
                         },
