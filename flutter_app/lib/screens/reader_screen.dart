@@ -98,8 +98,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
         _bookTitle = bookData['title'] as String?;
       }
       
-      // 获取内容
-      final contentResponse = await _apiClient.get('/api/books/${widget.bookId}/content');
+      // 获取内容 - reader 路由没有 /api 前缀
+      final contentResponse = await _apiClient.get('/books/${widget.bookId}/content');
       if (contentResponse.statusCode == 200) {
         final data = contentResponse.data as Map<String, dynamic>;
         setState(() {
