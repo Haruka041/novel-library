@@ -188,7 +188,6 @@ async def download_book(
 async def get_book_cover(
     book_id: int,
     size: str = Query("original", regex="^(original|thumbnail)$"),
-    style: str = Query("gradient", regex="^(gradient|letter|book|minimal)$"),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -197,7 +196,8 @@ async def get_book_cover(
     
     参数:
     - size: original(原图) 或 thumbnail(缩略图)
-    - style: 默认封面风格 (gradient/letter/book/minimal)
+    
+    注意：如果书籍没有封面，返回404，由前端处理fallback显示
     """
     from app.utils.cover_manager import cover_manager
     from sqlalchemy.orm import selectinload
@@ -220,17 +220,8 @@ async def get_book_cover(
                 media_type="image/jpeg"
             )
     
-    # 否则生成默认封面
-    cover_bytes = cover_manager.generate_default_cover(
-        title=book.title,
-        author=book.author.name if book.author else None,
-        style=style
-    )
-    
-    return Response(
-        content=cover_bytes,
-        media_type="image/png"
-    )
+    # 没有封面时返回404，让前端显示fallback UI
+    raise HTTPException(status_code=404, detail="该书籍没有封面")
 
 
 def _clean_txt_content(content: str) -> str:
