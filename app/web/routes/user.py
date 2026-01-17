@@ -17,6 +17,7 @@ from app.web.routes.dependencies import get_accessible_book
 from app.utils.logger import log
 from app.bot.handlers import generate_bind_code, cleanup_expired_codes
 from app.config import settings
+from app.web.routes.settings import load_telegram_settings
 
 router = APIRouter()
 
@@ -545,7 +546,11 @@ async def generate_telegram_bind_code(
     Returns:
         绑定码和过期时间
     """
-    if not settings.telegram.enabled:
+    # 从动态配置读取 Telegram 启用状态
+    tg_settings = load_telegram_settings()
+    bot_enabled = tg_settings.get("enabled", False) and bool(tg_settings.get("bot_token", ""))
+    
+    if not bot_enabled:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Telegram Bot 未启用"
@@ -559,15 +564,18 @@ async def generate_telegram_bind_code(
     
     log.info(f"用户 {current_user.username} 生成了 Telegram 绑定码")
     
+    # 绑定码过期时间（默认5分钟）
+    bind_code_expiry = 300
+    
     return {
         "status": "success",
         "bind_code": bind_code,
-        "expires_in": settings.telegram.bind_code_expiry,
+        "expires_in": bind_code_expiry,
         "instructions": [
             "1. 打开 Telegram",
             "2. 搜索并打开 Bot",
             f"3. 发送: /bind {bind_code}",
-            f"4. 绑定码将在 {settings.telegram.bind_code_expiry // 60} 分钟后过期"
+            f"4. 绑定码将在 {bind_code_expiry // 60} 分钟后过期"
         ]
     }
 
@@ -585,10 +593,14 @@ async def get_telegram_binding_status(
     Returns:
         绑定状态
     """
+    # 从动态配置读取 Telegram 启用状态
+    tg_settings = load_telegram_settings()
+    bot_enabled = tg_settings.get("enabled", False) and bool(tg_settings.get("bot_token", ""))
+    
     return {
         "is_bound": current_user.telegram_id is not None,
         "telegram_id": current_user.telegram_id,
-        "bot_enabled": settings.telegram.enabled
+        "bot_enabled": bot_enabled
     }
 
 
