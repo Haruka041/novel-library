@@ -131,6 +131,7 @@ export default function BookDetailPage() {
   const [bookGroupInfo, setBookGroupInfo] = useState<BookGroupInfo | null>(null)
   const [loadingGroup, setLoadingGroup] = useState(false)
   const [ungrouping, setUngrouping] = useState(false)
+  const [imageError, setImageError] = useState(false)
 
   useEffect(() => {
     if (id) {
@@ -148,6 +149,7 @@ export default function BookDetailPage() {
     try {
       setLoading(true)
       setError('')
+      setImageError(false)
       const response = await api.get<BookDetail>(`/api/books/${id}`)
       setBook(response.data)
     } catch (err) {
@@ -391,20 +393,23 @@ export default function BookDetailPage() {
                 overflow: 'hidden',
               }}
             >
-              <Box
-                component="img"
-                src={`/api/books/${book.id}/cover`}
-                alt={book.title}
-                sx={{
-                  width: '100%',
-                  height: '100%',
-                  objectFit: 'cover',
-                }}
-                onError={(e: React.SyntheticEvent<HTMLImageElement>) => {
-                  e.currentTarget.style.display = 'none'
-                  e.currentTarget.parentElement!.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:64px">📖</div>'
-                }}
-              />
+              {!imageError ? (
+                <Box
+                  component="img"
+                  src={`/api/books/${book.id}/cover`}
+                  alt={book.title}
+                  sx={{
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'cover',
+                  }}
+                  onError={() => setImageError(true)}
+                />
+              ) : (
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: '64px' }}>
+                  📖
+                </Box>
+              )}
             </Box>
           </Card>
         </Grid>
@@ -424,7 +429,7 @@ export default function BookDetailPage() {
           {/* 标签 */}
           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 3 }}>
             <Chip
-              label={book.file_format.toUpperCase()}
+              label={(book.file_format || 'UNKNOWN').toUpperCase()}
               color="primary"
               size="small"
             />
@@ -798,7 +803,7 @@ export default function BookDetailPage() {
               >
                 {/* 格式图标 */}
                 <Chip 
-                  label={version.file_format.toUpperCase()} 
+                  label={(version.file_format || '').toUpperCase()} 
                   size="small" 
                   color={version.is_primary ? 'primary' : 'default'}
                 />
@@ -856,7 +861,7 @@ export default function BookDetailPage() {
           
           {book.available_formats && book.available_formats.length > 1 && (
             <Alert severity="info" sx={{ mt: 2 }}>
-              此书籍有多种格式可用: {book.available_formats.map(f => f.toUpperCase()).join(', ')}
+              此书籍有多种格式可用: {book.available_formats.map(f => (f || '').toUpperCase()).join(', ')}
             </Alert>
           )}
         </DialogContent>
@@ -939,7 +944,7 @@ export default function BookDetailPage() {
                         {groupedBook.formats.map((format) => (
                           <Chip 
                             key={format} 
-                            label={format.toUpperCase()} 
+                            label={(format || '').toUpperCase()} 
                             size="small" 
                             variant="outlined"
                           />
