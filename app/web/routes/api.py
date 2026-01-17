@@ -451,6 +451,23 @@ async def get_book(
         tag_objects = result.scalars().all()
         tags = [{"id": t.id, "name": t.name, "type": t.type} for t in tag_objects]
     
+    # 构建版本列表
+    versions_data = []
+    for v in sorted(book.versions, key=lambda x: (not x.is_primary, x.added_at)):
+        versions_data.append({
+            "id": v.id,
+            "file_name": v.file_name,
+            "file_format": v.file_format,
+            "file_size": v.file_size,
+            "quality": v.quality,
+            "source": v.source,
+            "is_primary": v.is_primary,
+            "added_at": v.added_at.isoformat(),
+        })
+    
+    # 获取可用格式列表
+    available_formats = list(set(v.file_format for v in book.versions))
+    
     return {
         "id": book.id,
         "title": book.title,
@@ -464,6 +481,131 @@ async def get_book(
         "content_warning": book.content_warning,
         "added_at": book.added_at.isoformat(),
         "tags": tags,
+        # 多版本支持
+        "version_count": len(book.versions),
+        "versions": versions_data,
+        "available_formats": available_formats,
+    }
+
+
+# ===== 书籍版本管理 =====
+
+@router.get("/books/{book_id}/versions")
+async def get_book_versions(
+    book_id: int,
+    book: Book = Depends(get_accessible_book),
+    db: AsyncSession = Depends(get_db)
+):
+    """获取书籍的所有版本"""
+    await db.refresh(book, ['versions'])
+    
+    versions_data = []
+    for v in sorted(book.versions, key=lambda x: (not x.is_primary, x.added_at)):
+        versions_data.append({
+            "id": v.id,
+            "file_name": v.file_name,
+            "file_path": v.file_path,
+            "file_format": v.file_format,
+            "file_size": v.file_size,
+            "file_hash": v.file_hash,
+            "quality": v.quality,
+            "source": v.source,
+            "is_primary": v.is_primary,
+            "added_at": v.added_at.isoformat(),
+        })
+    
+    return {
+        "book_id": book_id,
+        "book_title": book.title,
+        "version_count": len(versions_data),
+        "versions": versions_data,
+    }
+
+
+@router.post("/books/{book_id}/versions/{version_id}/set-primary")
+async def set_primary_version(
+    book_id: int,
+    version_id: int,
+    book: Book = Depends(get_accessible_book),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """设置主版本"""
+    from app.models import BookVersion
+    
+    await db.refresh(book, ['versions'])
+    
+    # 验证版本属于该书籍
+    target_version = None
+    for v in book.versions:
+        if v.id == version_id:
+            target_version = v
+            break
+    
+    if not target_version:
+        raise HTTPException(status_code=404, detail="版本不存在")
+    
+    # 取消所有其他版本的主版本标记
+    for v in book.versions:
+        v.is_primary = (v.id == version_id)
+    
+    await db.commit()
+    
+    log.info(f"设置书籍 {book.title} 的主版本为 {target_version.file_name}")
+    
+    return {
+        "status": "success",
+        "message": f"已将 {target_version.file_name} 设为主版本",
+        "version_id": version_id,
+    }
+
+
+@router.delete("/books/{book_id}/versions/{version_id}")
+async def delete_book_version(
+    book_id: int,
+    version_id: int,
+    book: Book = Depends(get_accessible_book),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_admin)
+):
+    """删除书籍版本（需要管理员权限）"""
+    from app.models import BookVersion
+    
+    await db.refresh(book, ['versions'])
+    
+    # 验证版本属于该书籍
+    target_version = None
+    for v in book.versions:
+        if v.id == version_id:
+            target_version = v
+            break
+    
+    if not target_version:
+        raise HTTPException(status_code=404, detail="版本不存在")
+    
+    # 不允许删除唯一版本
+    if len(book.versions) == 1:
+        raise HTTPException(status_code=400, detail="不能删除唯一的版本")
+    
+    # 如果删除的是主版本，需要设置其他版本为主版本
+    was_primary = target_version.is_primary
+    file_name = target_version.file_name
+    
+    await db.delete(target_version)
+    
+    if was_primary:
+        # 设置第一个剩余版本为主版本
+        remaining = [v for v in book.versions if v.id != version_id]
+        if remaining:
+            remaining[0].is_primary = True
+    
+    await db.commit()
+    
+    log.info(f"删除书籍 {book.title} 的版本 {file_name}")
+    
+    return {
+        "status": "success",
+        "message": f"已删除版本 {file_name}",
     }
 
 

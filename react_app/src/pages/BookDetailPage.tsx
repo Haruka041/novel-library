@@ -9,7 +9,7 @@ import {
 import {
   ArrowBack, MenuBook, Download, Favorite, FavoriteBorder,
   AccessTime, Storage, PlayArrow, CheckCircle, Schedule,
-  Edit, LocalOffer
+  Edit, LocalOffer, Layers, Star, StarBorder, Delete
 } from '@mui/icons-material'
 import api from '../services/api'
 import { useAuthStore } from '../stores/authStore'
@@ -20,6 +20,17 @@ interface TagInfo {
   name: string
   type: string
   description?: string
+}
+
+interface BookVersion {
+  id: number
+  file_name: string
+  file_format: string
+  file_size: number
+  quality: string | null
+  source: string | null
+  is_primary: boolean
+  added_at: string
 }
 
 interface BookDetail {
@@ -35,6 +46,10 @@ interface BookDetail {
   content_warning: string | null
   added_at: string
   tags?: TagInfo[]
+  // 多版本支持
+  version_count?: number
+  versions?: BookVersion[]
+  available_formats?: string[]
 }
 
 interface ReadingProgress {
@@ -82,6 +97,10 @@ export default function BookDetailPage() {
   const [allTags, setAllTags] = useState<TagInfo[]>([])
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([])
   const [savingTags, setSavingTags] = useState(false)
+  
+  // 版本管理
+  const [versionDialogOpen, setVersionDialogOpen] = useState(false)
+  const [settingPrimary, setSettingPrimary] = useState<number | null>(null)
 
   useEffect(() => {
     if (id) {
@@ -217,6 +236,19 @@ export default function BookDetailPage() {
       console.error('切换收藏失败:', err)
       const errorMsg = err.response?.data?.detail || err.message || '操作失败，请重试'
       alert(errorMsg)
+    }
+  }
+
+  const handleSetPrimaryVersion = async (versionId: number) => {
+    try {
+      setSettingPrimary(versionId)
+      await api.post(`/api/books/${id}/versions/${versionId}/set-primary`)
+      await loadBook()
+    } catch (err: any) {
+      console.error('设置主版本失败:', err)
+      alert(err.response?.data?.detail || '设置失败')
+    } finally {
+      setSettingPrimary(null)
     }
   }
 
@@ -429,6 +461,16 @@ export default function BookDetailPage() {
             >
               标签
             </Button>
+            {book.versions && book.versions.length > 1 && (
+              <Button
+                variant="outlined"
+                size="large"
+                startIcon={<Layers />}
+                onClick={() => setVersionDialogOpen(true)}
+              >
+                版本 ({book.versions.length})
+              </Button>
+            )}
             <IconButton
               onClick={toggleFavorite}
               color={isFavorite ? 'error' : 'default'}
@@ -619,6 +661,100 @@ export default function BookDetailPage() {
           <Button variant="contained" onClick={handleSaveTags} disabled={savingTags}>
             {savingTags ? '保存中...' : '保存'}
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 版本管理对话框 */}
+      <Dialog open={versionDialogOpen} onClose={() => setVersionDialogOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Layers />
+          书籍版本管理
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            此书籍有 {book.versions?.length || 0} 个版本。主版本将用于阅读和下载。
+          </Typography>
+          
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            {book.versions?.map((version) => (
+              <Paper 
+                key={version.id} 
+                variant="outlined" 
+                sx={{ 
+                  p: 2,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 2,
+                  bgcolor: version.is_primary ? 'action.selected' : 'transparent',
+                  borderColor: version.is_primary ? 'primary.main' : 'divider'
+                }}
+              >
+                {/* 格式图标 */}
+                <Chip 
+                  label={version.file_format.toUpperCase()} 
+                  size="small" 
+                  color={version.is_primary ? 'primary' : 'default'}
+                />
+                
+                {/* 版本信息 */}
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Typography variant="body2" noWrap title={version.file_name}>
+                    {version.file_name}
+                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 2, mt: 0.5 }}>
+                    <Typography variant="caption" color="text.secondary">
+                      {formatFileSize(version.file_size)}
+                    </Typography>
+                    {version.quality && (
+                      <Typography variant="caption" color="text.secondary">
+                        品质: {version.quality}
+                      </Typography>
+                    )}
+                    {version.source && (
+                      <Typography variant="caption" color="text.secondary">
+                        来源: {version.source}
+                      </Typography>
+                    )}
+                    <Typography variant="caption" color="text.secondary">
+                      添加于 {formatDateShort(version.added_at)}
+                    </Typography>
+                  </Box>
+                </Box>
+                
+                {/* 主版本标记 */}
+                {version.is_primary && (
+                  <Chip 
+                    icon={<Star sx={{ fontSize: 16 }} />}
+                    label="主版本" 
+                    size="small" 
+                    color="warning"
+                  />
+                )}
+                
+                {/* 操作按钮 */}
+                {!version.is_primary && (
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={settingPrimary === version.id ? <CircularProgress size={16} /> : <StarBorder />}
+                    onClick={() => handleSetPrimaryVersion(version.id)}
+                    disabled={settingPrimary !== null}
+                  >
+                    设为主版本
+                  </Button>
+                )}
+              </Paper>
+            ))}
+          </Box>
+          
+          {book.available_formats && book.available_formats.length > 1 && (
+            <Alert severity="info" sx={{ mt: 2 }}>
+              此书籍有多种格式可用: {book.available_formats.map(f => f.toUpperCase()).join(', ')}
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setVersionDialogOpen(false)}>关闭</Button>
         </DialogActions>
       </Dialog>
     </Box>
