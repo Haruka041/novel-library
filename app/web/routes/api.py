@@ -339,6 +339,7 @@ async def list_books(
     library_id: Optional[int] = None,
     formats: Optional[str] = Query(None, description="按格式筛选（逗号分隔，如'txt,epub'）"),
     tag_ids: Optional[str] = Query(None, description="按标签筛选（逗号分隔的标签ID）"),
+    sort: Optional[str] = Query("added_at_desc", description="排序方式：added_at_desc, added_at_asc, title_asc, title_desc, size_desc, size_asc, format_asc, format_desc, rating_asc, rating_desc"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -349,6 +350,12 @@ async def list_books(
     - library_id: 按书库ID筛选
     - formats: 按格式筛选，多个格式用逗号分隔（如'txt,epub,mobi'）
     - tag_ids: 按标签筛选，多个标签ID用逗号分隔（如'1,2,3'）
+    支持排序：
+    - added_at_desc/asc: 按添加时间排序
+    - title_asc/desc: 按书名排序
+    - size_desc/asc: 按文件大小排序
+    - format_asc/desc: 按格式排序
+    - rating_asc/desc: 按分级排序
     """
     # 获取用户可访问的书库ID列表
     accessible_library_ids = await get_accessible_library_ids(current_user, db)
@@ -451,7 +458,33 @@ async def list_books(
         except Exception as e:
             log.error(f"标签筛选查询错误: {e}")
     
-    query = query.order_by(Book.added_at.desc())
+    # 应用排序
+    # 对于需要 BookVersion 的排序（size, format），在内存中处理
+    db_sort_applied = False
+    if sort:
+        sort_lower = sort.lower()
+        if sort_lower == "added_at_desc":
+            query = query.order_by(Book.added_at.desc())
+            db_sort_applied = True
+        elif sort_lower == "added_at_asc":
+            query = query.order_by(Book.added_at.asc())
+            db_sort_applied = True
+        elif sort_lower == "title_asc":
+            query = query.order_by(Book.title.asc())
+            db_sort_applied = True
+        elif sort_lower == "title_desc":
+            query = query.order_by(Book.title.desc())
+            db_sort_applied = True
+        elif sort_lower == "rating_asc":
+            query = query.order_by(Book.age_rating.asc())
+            db_sort_applied = True
+        elif sort_lower == "rating_desc":
+            query = query.order_by(Book.age_rating.desc())
+            db_sort_applied = True
+        # size_asc/desc 和 format_asc/desc 需要在获取数据后排序
+    
+    if not db_sort_applied:
+        query = query.order_by(Book.added_at.desc())
     
     # 获取所有符合条件的书籍（使用unique()去重，因为有joinedload关联）
     result = await db.execute(query)
@@ -462,6 +495,28 @@ async def list_books(
     for book in all_books:
         if await check_book_access(current_user, book.id, db):
             filtered_books.append(book)
+    
+    # 内存中排序（对于需要 BookVersion 的排序）
+    if sort:
+        sort_lower = sort.lower()
+        
+        def get_primary_version(book):
+            """获取书籍的主版本"""
+            if book.versions:
+                primary = next((v for v in book.versions if v.is_primary), None)
+                if not primary:
+                    primary = book.versions[0] if book.versions else None
+                return primary
+            return None
+        
+        if sort_lower == "size_desc":
+            filtered_books.sort(key=lambda b: (get_primary_version(b).file_size if get_primary_version(b) else 0), reverse=True)
+        elif sort_lower == "size_asc":
+            filtered_books.sort(key=lambda b: (get_primary_version(b).file_size if get_primary_version(b) else 0))
+        elif sort_lower == "format_asc":
+            filtered_books.sort(key=lambda b: (get_primary_version(b).file_format if get_primary_version(b) else ""))
+        elif sort_lower == "format_desc":
+            filtered_books.sort(key=lambda b: (get_primary_version(b).file_format if get_primary_version(b) else ""), reverse=True)
     
     # 计算总数和分页
     total_count = len(filtered_books)

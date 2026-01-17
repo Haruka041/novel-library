@@ -58,7 +58,7 @@ export default function LibraryPage() {
     if (!formatStr) return [] as string[]
     return formatStr.split(',').filter(Boolean)
   }, [searchParams])
-  const urlSort = searchParams.get('sort') || 'added_at'
+  const urlSort = searchParams.get('sort') || 'added_at_desc'
   const urlView = searchParams.get('view') as 'grid' | 'list' || 'grid'
   
   const [loading, setLoading] = useState(true)
@@ -185,6 +185,10 @@ export default function LibraryPage() {
       if (urlTags.length > 0) {
         url += `&tag_ids=${urlTags.join(',')}`
       }
+      // 添加排序参数
+      if (sortBy) {
+        url += `&sort=${sortBy}`
+      }
       
       const response = await api.get<BooksApiResponse>(url)
       
@@ -292,7 +296,14 @@ export default function LibraryPage() {
   // 处理排序变化
   const handleSortChange = (newSort: string) => {
     setSortBy(newSort)
-    updateUrlParams({ sort: newSort !== 'added_at' ? newSort : null })
+    updateUrlParams({ 
+      sort: newSort !== 'added_at_desc' ? newSort : null,
+      page: null  // 重置页码
+    })
+    // 立即重新加载
+    setBooks([])
+    setPage(1)
+    loadBooks(1, false)
   }
 
   // 处理视图模式变化
@@ -310,19 +321,6 @@ export default function LibraryPage() {
 
   // 计算当前有多少筛选条件
   const filterCount = selectedTags.length + selectedFormats.length
-
-  // 排序书籍
-  const sortedBooks = [...books].sort((a, b) => {
-    switch (sortBy) {
-      case 'title':
-        return (a.title || '').localeCompare(b.title || '')
-      case 'author':
-        return (a.author_name || '').localeCompare(b.author_name || '')
-      case 'added_at':
-      default:
-        return new Date(b.added_at || 0).getTime() - new Date(a.added_at || 0).getTime()
-    }
-  })
 
   // 根据封面尺寸计算网格列数
   const getGridColumns = () => {
@@ -407,16 +405,23 @@ export default function LibraryPage() {
         </FormControl>
 
         {/* 排序 */}
-        <FormControl size="small" sx={{ minWidth: 120 }}>
+        <FormControl size="small" sx={{ minWidth: 140 }}>
           <InputLabel>排序</InputLabel>
           <Select
             value={sortBy}
             label="排序"
             onChange={(e) => handleSortChange(e.target.value)}
           >
-            <MenuItem value="added_at">最新添加</MenuItem>
-            <MenuItem value="title">按标题</MenuItem>
-            <MenuItem value="author">按作者</MenuItem>
+            <MenuItem value="added_at_desc">最新添加</MenuItem>
+            <MenuItem value="added_at_asc">最早添加</MenuItem>
+            <MenuItem value="title_asc">标题 A-Z</MenuItem>
+            <MenuItem value="title_desc">标题 Z-A</MenuItem>
+            <MenuItem value="size_desc">大小↓</MenuItem>
+            <MenuItem value="size_asc">大小↑</MenuItem>
+            <MenuItem value="format_asc">格式 A-Z</MenuItem>
+            <MenuItem value="format_desc">格式 Z-A</MenuItem>
+            <MenuItem value="rating_asc">分级↑</MenuItem>
+            <MenuItem value="rating_desc">分级↓</MenuItem>
           </Select>
         </FormControl>
 
@@ -633,7 +638,7 @@ export default function LibraryPage() {
       ) : viewMode === 'grid' ? (
         <>
           <Grid container spacing={2}>
-            {sortedBooks.map((book) => (
+            {books.map((book) => (
               <Grid item {...getGridColumns()} key={book.id}>
                 <BookCard book={book} />
               </Grid>
@@ -644,7 +649,7 @@ export default function LibraryPage() {
       ) : (
         <>
           <Box>
-            {sortedBooks.map((book) => (
+            {books.map((book) => (
               <Box
                 key={book.id}
                 sx={{
