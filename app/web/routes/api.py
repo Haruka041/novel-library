@@ -98,6 +98,28 @@ class StatsResponse(BaseModel):
     total_libraries: int
 
 
+class ReadingSessionCreate(BaseModel):
+    """阅读会话创建请求"""
+    book_id: int
+    start_time: Optional[datetime] = None
+
+
+class ReadingHeartbeat(BaseModel):
+    """阅读心跳请求"""
+    session_id: int
+    duration_seconds: int
+    progress: Optional[float] = None
+    position: Optional[str] = None
+
+
+class ReadingSessionEnd(BaseModel):
+    """结束阅读会话请求"""
+    session_id: int
+    duration_seconds: int
+    progress: Optional[float] = None
+    position: Optional[str] = None
+
+
 # ===== 书库管理 =====
 
 @router.get("/libraries", response_model=List[LibraryResponse])
@@ -1030,3 +1052,158 @@ async def get_stats(
         "total_authors": total_authors,
         "total_libraries": total_libraries,
     }
+
+
+# ===== 阅读统计 =====
+
+@router.post("/stats/session/start", response_model=dict)
+async def start_reading_session(
+    data: ReadingSessionCreate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """开始阅读会话"""
+    from app.models import ReadingSession
+    from app.utils.permissions import check_book_access
+    
+    # 检查书籍访问权限
+    if not await check_book_access(current_user, data.book_id, db):
+        raise HTTPException(status_code=403, detail="无权访问此书籍")
+    
+    start_time = data.start_time or datetime.now(timezone.utc)
+    
+    # 获取客户端IP和设备信息
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    
+    session = ReadingSession(
+        user_id=current_user.id,
+        book_id=data.book_id,
+        start_time=start_time,
+        ip_address=ip_address,
+        device_info=user_agent
+    )
+    
+    db.add(session)
+    await db.commit()
+    await db.refresh(session)
+    
+    return {"session_id": session.id, "status": "started"}
+
+
+@router.post("/stats/session/heartbeat", response_model=dict)
+async def heartbeat_reading_session(
+    data: ReadingHeartbeat,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """阅读心跳更新"""
+    from app.models import ReadingSession, ReadingProgress
+    
+    # 获取会话
+    result = await db.execute(
+        select(ReadingSession).where(ReadingSession.id == data.session_id)
+    )
+    session = result.scalar_one_or_none()
+    
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+        
+    if session.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="无权访问此会话")
+    
+    # 更新会话信息
+    session.duration_seconds = data.duration_seconds
+    if data.progress is not None:
+        session.progress = data.progress
+    
+    # 同时更新总体阅读进度
+    if data.progress is not None or data.position is not None:
+        progress_result = await db.execute(
+            select(ReadingProgress)
+            .where(ReadingProgress.user_id == current_user.id)
+            .where(ReadingProgress.book_id == session.book_id)
+        )
+        reading_progress = progress_result.scalar_one_or_none()
+        
+        now = datetime.now(timezone.utc)
+        
+        if reading_progress:
+            if data.progress is not None:
+                reading_progress.progress = max(reading_progress.progress, data.progress)
+            if data.position is not None:
+                reading_progress.position = data.position
+            reading_progress.last_read_at = now
+        else:
+            reading_progress = ReadingProgress(
+                user_id=current_user.id,
+                book_id=session.book_id,
+                progress=data.progress or 0.0,
+                position=data.position,
+                last_read_at=now
+            )
+            db.add(reading_progress)
+            
+    await db.commit()
+    
+    return {"status": "updated"}
+
+
+@router.post("/stats/session/end", response_model=dict)
+async def end_reading_session(
+    data: ReadingSessionEnd,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """结束阅读会话"""
+    from app.models import ReadingSession, ReadingProgress
+    
+    # 获取会话
+    result = await db.execute(
+        select(ReadingSession).where(ReadingSession.id == data.session_id)
+    )
+    session = result.scalar_one_or_none()
+    
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+        
+    if session.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="无权访问此会话")
+    
+    # 更新会话信息
+    session.end_time = datetime.now(timezone.utc)
+    session.duration_seconds = data.duration_seconds
+    if data.progress is not None:
+        session.progress = data.progress
+        
+    # 同时更新总体阅读进度
+    if data.progress is not None or data.position is not None:
+        progress_result = await db.execute(
+            select(ReadingProgress)
+            .where(ReadingProgress.user_id == current_user.id)
+            .where(ReadingProgress.book_id == session.book_id)
+        )
+        reading_progress = progress_result.scalar_one_or_none()
+        
+        now = datetime.now(timezone.utc)
+        
+        if reading_progress:
+            if data.progress is not None:
+                reading_progress.progress = max(reading_progress.progress, data.progress)
+            if data.position is not None:
+                reading_progress.position = data.position
+            reading_progress.last_read_at = now
+        else:
+            reading_progress = ReadingProgress(
+                user_id=current_user.id,
+                book_id=session.book_id,
+                progress=data.progress or 0.0,
+                position=data.position,
+                last_read_at=now
+            )
+            db.add(reading_progress)
+    
+    await db.commit()
+    
+    return {"status": "ended"}

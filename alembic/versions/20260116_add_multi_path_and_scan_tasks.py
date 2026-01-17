@@ -11,8 +11,8 @@ from datetime import datetime
 
 
 # revision identifiers, used by Alembic.
-revision = '20260116_multipath'
-down_revision = 'a65cf1a541fe'
+revision = '20260116_add_multi_path_and_scan_tasks'
+down_revision = '868a6b4cdfa7'
 branch_labels = None
 depends_on = None
 

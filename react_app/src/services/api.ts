@@ -32,4 +32,54 @@ api.interceptors.response.use(
   }
 )
 
+export interface ReadingSessionStartResponse {
+  session_id: number
+  status: string
+}
+
+export interface ReadingSessionHeartbeatResponse {
+  status: string
+}
+
+export interface ReadingSessionEndResponse {
+  status: string
+}
+
+export const readingStatsApi = {
+  startSession: async (bookId: number): Promise<ReadingSessionStartResponse> => {
+    const response = await api.post('/api/stats/session/start', { book_id: bookId })
+    return response.data
+  },
+
+  sendHeartbeat: async (
+    sessionId: number,
+    durationSeconds: number,
+    progress: number,
+    position?: string
+  ): Promise<ReadingSessionHeartbeatResponse> => {
+    const response = await api.post('/api/stats/session/heartbeat', {
+      session_id: sessionId,
+      duration_seconds: durationSeconds,
+      progress,
+      position,
+    })
+    return response.data
+  },
+
+  endSession: async (
+    sessionId: number,
+    durationSeconds: number,
+    progress: number,
+    position?: string
+  ): Promise<ReadingSessionEndResponse> => {
+    const response = await api.post('/api/stats/session/end', {
+      session_id: sessionId,
+      duration_seconds: durationSeconds,
+      progress,
+      position,
+    })
+    return response.data
+  },
+}
+
 export default api

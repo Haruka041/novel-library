@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = '20260117_add_tag_group'
-down_revision = '20260117_add_book_groups'
+down_revision = '20260117_annotations'
 branch_labels = None
 depends_on = None
 

@@ -60,7 +60,7 @@ async def create_bookmark(
     需要有书籍访问权限
     """
     # 验证书籍访问权限
-    book = await get_accessible_book(bookmark_data.book_id, current_user, db)
+    book = await get_accessible_book(bookmark_data.book_id, db, current_user)
     
     # 创建书签
     bookmark = Bookmark(
