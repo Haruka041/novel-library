@@ -121,6 +121,13 @@ class ReadingSessionEnd(BaseModel):
     position: Optional[str] = None
 
 
+class SearchSuggestion(BaseModel):
+    """搜索建议"""
+    text: str
+    type: str  # 'book' or 'author'
+    id: int
+
+
 # ===== 书库管理 =====
 
 @router.get("/libraries", response_model=List[LibraryResponse])
@@ -862,6 +869,71 @@ async def update_progress(
 
 
 # ===== 搜索功能 =====
+
+@router.get("/search/suggestions", response_model=List[SearchSuggestion])
+async def search_suggestions(
+    q: str = Query(..., min_length=1, description="搜索关键词"),
+    limit: int = Query(10, ge=1, le=20),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    获取搜索建议
+    返回匹配的书名和作者名
+    """
+    if not q.strip():
+        return []
+        
+    # 获取用户可访问的书库
+    accessible_library_ids = await get_accessible_library_ids(current_user, db)
+    
+    if not accessible_library_ids:
+        return []
+    
+    search_term = f"%{q}%"
+    suggestions = []
+    
+    # 1. 搜索匹配的书籍
+    # 只查询可访问书库中的书籍
+    book_stmt = select(Book.id, Book.title).where(
+        and_(
+            Book.library_id.in_(accessible_library_ids),
+            Book.title.like(search_term)
+        )
+    ).limit(limit)
+    
+    book_result = await db.execute(book_stmt)
+    for row in book_result:
+        suggestions.append(SearchSuggestion(
+            text=row.title,
+            type="book",
+            id=row.id
+        ))
+    
+    # 如果建议数量还不够，搜索作者
+    if len(suggestions) < limit:
+        remaining = limit - len(suggestions)
+        
+        # 搜索作者（需要确保作者至少有一本书在用户可访问的书库中）
+        # 这里为了性能简化查询，只查作者名匹配，不严格检查每本书的权限
+        # 但通常作者存在就意味着有书。为了更严谨，可以关联 Book 表检查 library_id
+        author_stmt = select(Author.id, Author.name).join(Book).where(
+            and_(
+                Book.library_id.in_(accessible_library_ids),
+                Author.name.like(search_term)
+            )
+        ).distinct().limit(remaining)
+        
+        author_result = await db.execute(author_stmt)
+        for row in author_result:
+            suggestions.append(SearchSuggestion(
+                text=row.name,
+                type="author",
+                id=row.id
+            ))
+            
+    return suggestions
+
 
 @router.get("/search")
 async def search_books(

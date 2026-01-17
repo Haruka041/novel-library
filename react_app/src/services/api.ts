@@ -54,6 +54,12 @@ export interface ReadingSessionEndResponse {
   status: string
 }
 
+export interface SearchSuggestion {
+  text: string
+  type: 'book' | 'author'
+  id: number
+}
+
 export const readingStatsApi = {
   startSession: async (bookId: number): Promise<ReadingSessionStartResponse> => {
     const response = await api.post('/api/stats/session/start', { book_id: bookId })
@@ -99,6 +105,11 @@ export const commonApi = {
   
   getLibraries: async (): Promise<LibrarySummary[]> => {
     const response = await api.get('/api/libraries')
+    return response.data
+  },
+
+  getSearchSuggestions: async (q: string): Promise<SearchSuggestion[]> => {
+    const response = await api.get('/api/search/suggestions', { params: { q } })
     return response.data
   }
 }

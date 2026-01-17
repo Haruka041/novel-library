@@ -1,13 +1,13 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Box, Typography, TextField, InputAdornment, Grid,
   CircularProgress, Alert, Chip, Accordion, AccordionSummary, AccordionDetails,
   FormControl, InputLabel, Select, MenuItem, OutlinedInput, Checkbox, ListItemText, Button,
-  Stack
+  Stack, Paper, List, ListItem, ListItemButton, ListItemIcon, ClickAwayListener
 } from '@mui/material'
-import { Search, Clear, FilterList, ExpandMore } from '@mui/icons-material'
-import api, { commonApi } from '../services/api'
+import { Search, Clear, FilterList, ExpandMore, Person, Book as BookIcon } from '@mui/icons-material'
+import api, { commonApi, SearchSuggestion } from '../services/api'
 import { BookSummary, Author, LibrarySummary } from '../types'
 import BookCard from '../components/BookCard'
 import Pagination from '../components/Pagination'
@@ -63,6 +63,11 @@ export default function SearchPage() {
   const [total, setTotal] = useState(0)
   const [totalPages, setTotalPages] = useState(0)
   const [searchHistory, setSearchHistory] = useState<string[]>([])
+
+  // 搜索建议状态
+  const [suggestions, setSuggestions] = useState<SearchSuggestion[]>([])
+  const [showSuggestions, setShowSuggestions] = useState(false)
+  const isSelectingSuggestion = useRef(false)
   
   // 加载元数据（作者和书库）
   useEffect(() => {
@@ -88,6 +93,31 @@ export default function SearchPage() {
       setSearchHistory(JSON.parse(history))
     }
   }, [])
+
+  // 搜索建议防抖
+  useEffect(() => {
+    if (isSelectingSuggestion.current) {
+      isSelectingSuggestion.current = false
+      return
+    }
+
+    const timer = setTimeout(async () => {
+      if (query.trim() && query.trim().length >= 1) {
+        try {
+          const results = await commonApi.getSearchSuggestions(query.trim())
+          setSuggestions(results)
+          setShowSuggestions(true)
+        } catch (err) {
+          console.error('获取建议失败:', err)
+        }
+      } else {
+        setSuggestions([])
+        setShowSuggestions(false)
+      }
+    }, 300)
+
+    return () => clearTimeout(timer)
+  }, [query])
 
   // URL 参数变化时搜索
   useEffect(() => {
@@ -190,6 +220,7 @@ export default function SearchPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+    setShowSuggestions(false)
     // 搜索时重置页码为 1
     updateSearchParams({
       q: query.trim(),
@@ -198,6 +229,34 @@ export default function SearchPage() {
       library_id: selectedLibrary,
       formats: selectedFormats
     })
+  }
+
+  const handleSuggestionClick = (suggestion: SearchSuggestion) => {
+    isSelectingSuggestion.current = true
+    setQuery(suggestion.text)
+    setShowSuggestions(false)
+    
+    // 如果是作者，自动设置作者筛选
+    if (suggestion.type === 'author') {
+      updateSearchParams({
+        q: '', // 清空搜索词，直接用作者筛选
+        page: 1,
+        author_id: suggestion.id,
+        library_id: selectedLibrary,
+        formats: selectedFormats
+      })
+      setSelectedAuthor(suggestion.id)
+      setQuery('') // UI上也清空
+    } else {
+      // 书籍搜索
+      updateSearchParams({
+        q: suggestion.text,
+        page: 1,
+        author_id: selectedAuthor,
+        library_id: selectedLibrary,
+        formats: selectedFormats
+      })
+    }
   }
   
   const handlePageChange = (newPage: number) => {
@@ -242,46 +301,90 @@ export default function SearchPage() {
       </Typography>
 
       {/* 搜索框 */}
-      <Box component="form" onSubmit={handleSubmit} sx={{ mb: 2 }}>
-        <TextField
-          fullWidth
-          placeholder="搜索书名或作者..."
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <Search />
-              </InputAdornment>
-            ),
-            endAdornment: query && (
-              <InputAdornment position="end">
-                <Clear
-                  sx={{ cursor: 'pointer' }}
-                  onClick={() => {
-                    setQuery('')
-                    // 如果没有筛选器，也清除搜索结果
-                    if (!hasActiveFilters) {
-                      setBooks([])
-                      setTotal(0)
-                      setSearchParams({})
-                    } else {
-                      // 有筛选器时，只清除搜索词并重新搜索
-                      updateSearchParams({
-                        q: '',
-                        page: 1,
-                        author_id: selectedAuthor,
-                        library_id: selectedLibrary,
-                        formats: selectedFormats
-                      })
-                    }
-                  }}
-                />
-              </InputAdornment>
-            ),
-          }}
-        />
-      </Box>
+      <ClickAwayListener onClickAway={() => setShowSuggestions(false)}>
+        <Box sx={{ position: 'relative', mb: 2 }}>
+          <Box component="form" onSubmit={handleSubmit}>
+            <TextField
+              fullWidth
+              placeholder="搜索书名或作者..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onFocus={() => {
+                if (suggestions.length > 0) setShowSuggestions(true)
+              }}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <Search />
+                  </InputAdornment>
+                ),
+                endAdornment: query && (
+                  <InputAdornment position="end">
+                    <Clear
+                      sx={{ cursor: 'pointer' }}
+                      onClick={() => {
+                        setQuery('')
+                        setSuggestions([])
+                        setShowSuggestions(false)
+                        // 如果没有筛选器，也清除搜索结果
+                        if (!hasActiveFilters) {
+                          setBooks([])
+                          setTotal(0)
+                          setSearchParams({})
+                        } else {
+                          // 有筛选器时，只清除搜索词并重新搜索
+                          updateSearchParams({
+                            q: '',
+                            page: 1,
+                            author_id: selectedAuthor,
+                            library_id: selectedLibrary,
+                            formats: selectedFormats
+                          })
+                        }
+                      }}
+                    />
+                  </InputAdornment>
+                ),
+              }}
+            />
+          </Box>
+          
+          {/* 搜索建议下拉列表 */}
+          {showSuggestions && suggestions.length > 0 && (
+            <Paper
+              elevation={3}
+              sx={{
+                position: 'absolute',
+                top: '100%',
+                left: 0,
+                right: 0,
+                zIndex: 10,
+                mt: 0.5,
+                maxHeight: 300,
+                overflow: 'auto'
+              }}
+            >
+              <List disablePadding>
+                {suggestions.map((suggestion) => (
+                  <ListItem key={`${suggestion.type}-${suggestion.id}`} disablePadding>
+                    <ListItemButton onClick={() => handleSuggestionClick(suggestion)}>
+                      <ListItemIcon sx={{ minWidth: 40 }}>
+                        {suggestion.type === 'author' ? <Person fontSize="small" /> : <BookIcon fontSize="small" />}
+                      </ListItemIcon>
+                      <ListItemText 
+                        primary={suggestion.text} 
+                        secondary={suggestion.type === 'author' ? '作者' : '书籍'}
+                        primaryTypographyProps={{ variant: 'body2', fontWeight: 500 }}
+                        secondaryTypographyProps={{ variant: 'caption' }}
+                      />
+                    </ListItemButton>
+                  </ListItem>
+                ))}
+              </List>
+            </Paper>
+          )}
+        </Box>
+      </ClickAwayListener>
 
       {/* 高级筛选 */}
       <Accordion sx={{ mb: 3, boxShadow: 1 }} defaultExpanded={!!hasActiveFilters}>
