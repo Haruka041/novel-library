@@ -16,6 +16,8 @@ from app.models import Book, User
 from app.web.routes.auth import get_current_user
 from app.web.routes.dependencies import get_accessible_book
 from app.utils.logger import log
+from app.core.metadata.comic_parser import ComicParser
+from io import BytesIO
 
 router = APIRouter()
 
@@ -92,6 +94,20 @@ async def get_book_toc(
         return {
             "format": "epub",
             "message": "EPUB目录由前端处理"
+        }
+
+    elif file_format in ['pdf', '.pdf']:
+        return {
+            "format": "pdf",
+            "message": "PDF目录由前端处理"
+        }
+
+    elif file_format in ['zip', '.zip', 'cbz', '.cbz']:
+        images = ComicParser.get_image_list(file_path)
+        return {
+            "format": "comic",
+            "images": images,
+            "totalImages": len(images)
         }
     
     else:
@@ -331,11 +347,80 @@ async def get_book_content(
             media_type="application/epub+zip",
             filename=primary_version.file_name
         )
+    elif file_format == 'pdf' or file_format == '.pdf':
+        return FileResponse(
+            file_path,
+            media_type="application/pdf",
+            filename=primary_version.file_name
+        )
     else:
         raise HTTPException(
             status_code=400,
             detail=f"不支持的文件格式: {file_format}"
         )
+
+
+@router.get("/books/{book_id}/comic/page/{index}")
+async def get_comic_page(
+    book_id: int,
+    index: int,
+    book: Book = Depends(get_accessible_book),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    获取漫画页面图片
+    
+    Args:
+        index: 图片索引（从0开始，对应 TOC 返回的 images 列表索引）
+    """
+    from sqlalchemy.orm import selectinload
+    
+    await db.refresh(book, ['versions'])
+    
+    primary_version = None
+    if book.versions:
+        primary_version = next((v for v in book.versions if v.is_primary), None)
+        if not primary_version:
+            primary_version = book.versions[0] if book.versions else None
+    
+    if not primary_version:
+        raise HTTPException(status_code=404, detail="书籍没有可用的文件版本")
+    
+    file_path = Path(primary_version.file_path)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="文件不存在")
+    
+    file_format = primary_version.file_format.lower()
+    if file_format not in ['zip', '.zip', 'cbz', '.cbz']:
+        raise HTTPException(status_code=400, detail="不是漫画文件")
+
+    # 获取图片列表
+    images = ComicParser.get_image_list(file_path)
+    
+    if index < 0 or index >= len(images):
+        raise HTTPException(status_code=404, detail="页面索引超出范围")
+        
+    image_info = images[index]
+    filename = image_info['filename']
+    
+    # 获取图片数据
+    image_data = ComicParser.get_image_data(file_path, filename)
+    
+    if image_data is None:
+        raise HTTPException(status_code=500, detail="读取图片失败")
+        
+    # 确定 MIME type
+    ext = Path(filename).suffix.lower()
+    mime_type = "image/jpeg"
+    if ext == '.png':
+        mime_type = "image/png"
+    elif ext == '.webp':
+        mime_type = "image/webp"
+    elif ext == '.gif':
+        mime_type = "image/gif"
+        
+    return Response(content=image_data, media_type=mime_type)
 
 
 async def _read_txt_content(file_path: Path, page: int = 0) -> dict:

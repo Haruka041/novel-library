@@ -15,6 +15,8 @@ import {
 import ePub, { Book, Rendition } from 'epubjs'
 import api, { readingStatsApi } from '../services/api'
 import { useAuthStore } from '../stores/authStore'
+import PDFReader from '../components/reader/PDFReader'
+import ComicReader from '../components/reader/ComicReader'
 
 interface TocChapter {
   title: string
@@ -96,6 +98,11 @@ interface AnnotationInfo {
   updated_at: string
 }
 
+interface ComicImage {
+  filename: string
+  size: number
+}
+
 // 高亮颜色配置 (增加透明度以适应深色模式)
 const highlightColors = {
   yellow: { bg: 'rgba(255, 235, 59, 0.5)', name: '黄色' },
@@ -129,8 +136,13 @@ export default function ReaderPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [bookInfo, setBookInfo] = useState<{ title: string; format: string } | null>(null)
-  const [isEpub, setIsEpub] = useState(false)
+  const [format, setFormat] = useState<'txt' | 'epub' | 'pdf' | 'comic' | null>(null)
+  // 兼容旧代码
+  const isEpub = format === 'epub'
   
+  // 漫画图片列表
+  const [comicImages, setComicImages] = useState<ComicImage[]>([])
+
   // 章节加载状态（新逻辑）
   const [chapters, setChapters] = useState<TocChapter[]>([])  // 完整目录
   const [loadedChapters, setLoadedChapters] = useState<LoadedChapter[]>([])  // 已加载的章节内容
@@ -333,17 +345,20 @@ export default function ReaderPage() {
   // 保存进度（防抖）
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (currentChapter >= 0 && id && !isEpub) {
+      if (currentChapter >= 0 && id && !isEpub && format === 'txt') {
+        saveProgress()
+      } else if ((format === 'pdf' || format === 'comic') && id) {
+        // PDF 和 Comic 也保存进度
         saveProgress()
       }
     }, 1000)
     return () => clearTimeout(timer)
-  }, [currentChapter, progress])
+  }, [currentChapter, progress, format])
 
   // 页面卸载时保存进度
   useEffect(() => {
     const handleBeforeUnload = () => {
-      if (currentChapter >= 0 && id && !isEpub) {
+      if (currentChapter >= 0 && id) {
         // 使用章节号作为位置信息
         const data = JSON.stringify({
           progress: progress,
@@ -404,7 +419,7 @@ export default function ReaderPage() {
 
   // 自动滚动功能
   useEffect(() => {
-    if (autoScroll && contentRef.current && !isEpub) {
+    if (autoScroll && contentRef.current && format === 'txt') {
       autoScrollRef.current = window.setInterval(() => {
         if (contentRef.current) {
           contentRef.current.scrollTop += autoScrollSpeed / 60
@@ -424,7 +439,7 @@ export default function ReaderPage() {
         clearInterval(autoScrollRef.current)
       }
     }
-  }, [autoScroll, autoScrollSpeed, isEpub])
+  }, [autoScroll, autoScrollSpeed, format])
 
   // 全屏切换
   const toggleFullscreen = () => {
@@ -455,13 +470,13 @@ export default function ReaderPage() {
     const width = rect.width
     
     if (x < width * 0.25) {
-      if (isEpub) {
+      if (format === 'epub') {
         epubPrev()
       } else {
         prevChapter()
       }
     } else if (x > width * 0.75) {
-      if (isEpub) {
+      if (format === 'epub') {
         epubNext()
       } else {
         nextChapter()
@@ -535,25 +550,33 @@ export default function ReaderPage() {
       }
 
       const bookResponse = await api.get(`/api/books/${id}`)
-      const format = bookResponse.data.file_format.toLowerCase()
+      const fileFormat = bookResponse.data.file_format.toLowerCase()
       setBookInfo({
         title: bookResponse.data.title,
-        format: format,
+        format: fileFormat,
       })
 
-      if (format === 'epub' || format === '.epub') {
-        setIsEpub(true)
+      if (fileFormat === 'epub' || fileFormat === '.epub') {
+        setFormat('epub')
         await loadEpub()
-      } else if (format === 'txt' || format === '.txt') {
-        setIsEpub(false)
+      } else if (fileFormat === 'txt' || fileFormat === '.txt') {
+        setFormat('txt')
         // 保存待恢复的偏移
         pendingScrollOffsetRef.current = initialChapterOffset
         // 先加载完整目录
         await loadToc()
         // 然后加载初始章节
         await loadChapterContent(initialChapterIndex)
+      } else if (fileFormat === 'pdf' || fileFormat === '.pdf') {
+        setFormat('pdf')
+        setCurrentChapter(initialChapterIndex)
+        setTotalChapters(1) 
+      } else if (['zip', '.zip', 'cbz', '.cbz'].includes(fileFormat)) {
+        setFormat('comic')
+        await loadToc()
+        setCurrentChapter(initialChapterIndex)
       } else {
-        setError(`暂不支持 ${format} 格式的在线阅读`)
+        setError(`暂不支持 ${fileFormat} 格式的在线阅读`)
       }
     } catch (err: unknown) {
       console.error('加载书籍失败:', err)
@@ -573,6 +596,14 @@ export default function ReaderPage() {
         setChapters(data.chapters || [])
         setTotalLength(data.totalLength || 0)
         setTotalChapters(data.chapters?.length || 0)
+      } else if (data.format === 'comic') {
+        setComicImages(data.images || [])
+        setTotalChapters(data.totalImages || 0)
+        setChapters(data.images.map((img: ComicImage, idx: number) => ({
+          title: `第 ${idx + 1} 页`,
+          startOffset: idx,
+          endOffset: idx + 1
+        })))
       }
     } catch (err) {
       console.error('加载目录失败:', err)
@@ -813,13 +844,20 @@ export default function ReaderPage() {
     try {
       // 计算当前章节内的滚动偏移
       let scrollOffset = 0
-      if (contentRef.current) {
+      if (contentRef.current && format === 'txt') {
         const chapterEl = chapterRefs.current.get(currentChapter)
         if (chapterEl) {
           const containerRect = contentRef.current.getBoundingClientRect()
           const chapterRect = chapterEl.getBoundingClientRect()
           // 容器顶部减去章节顶部 = 章节已经滚过的距离
           scrollOffset = Math.max(0, containerRect.top - chapterRect.top)
+        }
+      } else if (format === 'pdf' || format === 'comic') {
+        // PDF 和 Comic 没有偏移概念，或者可以用来存缩放比例等，目前为0
+        scrollOffset = 0
+        // 更新 progress
+        if (totalChapters > 0) {
+          setProgress(currentChapter / totalChapters)
         }
       }
       
@@ -835,7 +873,7 @@ export default function ReaderPage() {
 
   // 监听滚动，更新当前章节并预加载
   const handleScroll = useCallback(() => {
-    if (!contentRef.current || isEpub || loadedChapters.length === 0) return
+    if (!contentRef.current || isEpub || format !== 'txt' || loadedChapters.length === 0) return
     
     const container = contentRef.current
     const containerRect = container.getBoundingClientRect()
@@ -875,17 +913,25 @@ export default function ReaderPage() {
     if (scrollTop + clientHeight > scrollHeight - 500 && loadedRange.end < totalChapters - 1) {
       loadMoreChapters('next')
     }
-  }, [currentChapter, isEpub, loadedChapters, loadedRange, totalChapters, totalLength])
+  }, [currentChapter, isEpub, loadedChapters, loadedRange, totalChapters, totalLength, format])
 
   const goToChapter = (index: number) => {
     setTocOpen(false)
     
-    // 如果章节在已加载范围内，直接滚动
-    if (index >= loadedRange.start && index <= loadedRange.end) {
-      scrollToChapter(index)
-    } else {
-      // 需要重新加载
-      loadChapterContent(index)
+    if (format === 'txt') {
+      // 如果章节在已加载范围内，直接滚动
+      if (index >= loadedRange.start && index <= loadedRange.end) {
+        scrollToChapter(index)
+      } else {
+        // 需要重新加载
+        loadChapterContent(index)
+      }
+    } else if (format === 'pdf' || format === 'comic') {
+      setCurrentChapter(index)
+      // 更新进度
+      if (totalChapters > 0) {
+        setProgress(index / totalChapters)
+      }
     }
   }
 
@@ -1529,7 +1575,7 @@ export default function ReaderPage() {
       </AppBar>
 
       {/* 内容区域 */}
-      {isEpub ? (
+      {format === 'epub' ? (
         <Box
           ref={epubViewerRef}
           sx={{
@@ -1540,6 +1586,27 @@ export default function ReaderPage() {
             transition: 'padding 0.3s ease',
           }}
         />
+      ) : format === 'pdf' ? (
+        <Box sx={{ pt: showToolbar ? 8 : 0, pb: showToolbar ? 10 : 0 }}>
+          <PDFReader
+            url={`/api/books/${id}/content`}
+            token={token}
+            currentPage={currentChapter}
+            onLoadSuccess={(total) => setTotalChapters(total)}
+            scale={1.0}
+          />
+        </Box>
+      ) : format === 'comic' ? (
+        <Box sx={{ pt: showToolbar ? 8 : 0, pb: showToolbar ? 10 : 0 }}>
+          {id && (
+            <ComicReader
+              bookId={id}
+              images={comicImages}
+              currentPage={currentChapter}
+              onPageLoad={() => {}}
+            />
+          )}
+        </Box>
       ) : (
         <Box
           ref={contentRef}
