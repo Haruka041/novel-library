@@ -118,7 +118,9 @@ export default function LibrariesTab() {
   // 路径管理
   const [paths, setPaths] = useState<Record<number, LibraryPath[]>>({})
   const [pathDialogOpen, setPathDialogOpen] = useState(false)
+  const [pathDialogMode, setPathDialogMode] = useState<'add' | 'edit'>('add')
   const [selectedLibraryForPath, setSelectedLibraryForPath] = useState<number | null>(null)
+  const [editingPath, setEditingPath] = useState<LibraryPath | null>(null)
   const [newPath, setNewPath] = useState('')
   
   // 扫描任务
@@ -750,7 +752,17 @@ export default function LibrariesTab() {
 
   const handleAddPath = (libraryId: number) => {
     setSelectedLibraryForPath(libraryId)
+    setPathDialogMode('add')
+    setEditingPath(null)
     setNewPath('')
+    setPathDialogOpen(true)
+  }
+
+  const handleEditPath = (libraryId: number, path: LibraryPath) => {
+    setSelectedLibraryForPath(libraryId)
+    setPathDialogMode('edit')
+    setEditingPath(path)
+    setNewPath(path.path)
     setPathDialogOpen(true)
   }
 
@@ -758,14 +770,22 @@ export default function LibrariesTab() {
     if (!selectedLibraryForPath || !newPath.trim()) return
     
     try {
-      await api.post(`/api/admin/libraries/${selectedLibraryForPath}/paths`, {
-        path: newPath
-      })
+      if (pathDialogMode === 'edit' && editingPath) {
+        // 编辑模式
+        await api.put(`/api/admin/libraries/${selectedLibraryForPath}/paths/${editingPath.id}`, {
+          path: newPath
+        })
+      } else {
+        // 添加模式
+        await api.post(`/api/admin/libraries/${selectedLibraryForPath}/paths`, {
+          path: newPath
+        })
+      }
       setPathDialogOpen(false)
       await loadLibraryPaths(selectedLibraryForPath)
-    } catch (err) {
-      console.error('添加路径失败:', err)
-      setError('添加路径失败')
+    } catch (err: any) {
+      console.error(pathDialogMode === 'edit' ? '编辑路径失败:' : '添加路径失败:', err)
+      setError(err.response?.data?.detail || (pathDialogMode === 'edit' ? '编辑路径失败' : '添加路径失败'))
     }
   }
 
@@ -1120,9 +1140,19 @@ export default function LibrariesTab() {
                                 <IconButton
                                   edge="end"
                                   size="small"
+                                  onClick={() => handleEditPath(library.id, path)}
+                                  title="编辑路径"
+                                  sx={{ ml: 1 }}
+                                >
+                                  <Edit fontSize="small" />
+                                </IconButton>
+                                <IconButton
+                                  edge="end"
+                                  size="small"
                                   onClick={() => handleDeletePath(library.id, path.id)}
                                   color="error"
-                                  sx={{ ml: 1 }}
+                                  title="删除路径"
+                                  sx={{ ml: 0.5 }}
                                 >
                                   <DeleteOutline fontSize="small" />
                                 </IconButton>
@@ -1384,9 +1414,9 @@ export default function LibrariesTab() {
         </DialogActions>
       </Dialog>
 
-      {/* 添加路径对话框 */}
+      {/* 添加/编辑路径对话框 */}
       <Dialog open={pathDialogOpen} onClose={() => setPathDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>添加扫描路径</DialogTitle>
+        <DialogTitle>{pathDialogMode === 'edit' ? '编辑扫描路径' : '添加扫描路径'}</DialogTitle>
         <DialogContent>
           <TextField
             label="路径"
@@ -1394,13 +1424,16 @@ export default function LibrariesTab() {
             onChange={(e) => setNewPath(e.target.value)}
             fullWidth
             required
+            autoFocus
             helperText="输入书籍文件所在的目录路径"
             sx={{ mt: 1 }}
           />
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setPathDialogOpen(false)}>取消</Button>
-          <Button variant="contained" onClick={handleSubmitPath}>添加</Button>
+          <Button variant="contained" onClick={handleSubmitPath}>
+            {pathDialogMode === 'edit' ? '保存' : '添加'}
+          </Button>
         </DialogActions>
       </Dialog>
 

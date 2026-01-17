@@ -168,6 +168,61 @@ async def list_library_paths(
     return paths
 
 
+class PathUpdate(BaseModel):
+    """更新路径请求"""
+    path: str
+
+
+@router.put("/admin/libraries/{library_id}/paths/{path_id}", response_model=PathResponse)
+async def update_library_path(
+    library_id: int,
+    path_id: int,
+    path_data: PathUpdate,
+    current_user: User = Depends(admin_required),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    更新书库路径
+    """
+    # 获取路径
+    result = await db.execute(
+        select(LibraryPath)
+        .where(LibraryPath.id == path_id)
+        .where(LibraryPath.library_id == library_id)
+    )
+    path = result.scalar_one_or_none()
+    
+    if not path:
+        raise HTTPException(status_code=404, detail="路径不存在")
+    
+    # 验证新路径
+    new_path = path_data.path.strip()
+    if not new_path:
+        raise HTTPException(status_code=400, detail="路径不能为空")
+    
+    if len(new_path) > 500:
+        raise HTTPException(status_code=400, detail="路径长度不能超过500个字符")
+    
+    # 检查新路径是否与其他路径冲突
+    existing = await db.execute(
+        select(LibraryPath)
+        .where(LibraryPath.library_id == library_id)
+        .where(LibraryPath.path == new_path)
+        .where(LibraryPath.id != path_id)
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="该路径已存在")
+    
+    old_path = path.path
+    path.path = new_path
+    await db.commit()
+    await db.refresh(path)
+    
+    log.info(f"管理员 {current_user.username} 更新了书库路径: {old_path} -> {new_path}")
+    
+    return path
+
+
 @router.delete("/admin/libraries/{library_id}/paths/{path_id}")
 async def remove_library_path(
     library_id: int,
