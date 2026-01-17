@@ -345,11 +345,21 @@ async def list_books(
     # 按格式筛选
     if formats:
         from app.models import BookVersion
+        from sqlalchemy import or_, func
         format_list = [f.strip().lower() for f in formats.split(',') if f.strip()]
         if format_list:
+            # 处理带点和不带点的格式（如 txt 和 .txt）
+            # 数据库可能存储为 .txt 或 txt，需要兼容
+            format_conditions = []
+            for fmt in format_list:
+                # 不带点的格式
+                format_conditions.append(func.lower(BookVersion.file_format) == fmt.lower())
+                # 带点的格式
+                format_conditions.append(func.lower(BookVersion.file_format) == f".{fmt}".lower())
+            
             # 子查询：找到有匹配格式版本的书籍ID
             subquery = select(BookVersion.book_id).where(
-                BookVersion.file_format.in_(format_list)
+                or_(*format_conditions)
             ).distinct()
             query = query.where(Book.id.in_(subquery))
     

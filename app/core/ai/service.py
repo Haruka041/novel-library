@@ -355,6 +355,24 @@ class AIService:
         
         return response
     
+    def _strip_extension(self, filename: str) -> str:
+        """
+        移除文件名的扩展名
+        
+        Args:
+            filename: 原文件名
+        
+        Returns:
+            不带扩展名的文件名
+        """
+        import os
+        # 常见电子书扩展名
+        known_extensions = {'.txt', '.epub', '.mobi', '.azw', '.azw3', '.pdf', '.docx', '.doc'}
+        name, ext = os.path.splitext(filename)
+        if ext.lower() in known_extensions:
+            return name
+        return filename
+    
     async def analyze_filename_patterns(self, filenames: List[str], sample_size: int = None) -> Dict[str, Any]:
         """
         使用AI分析文件名模式，生成解析规则建议
@@ -378,12 +396,16 @@ class AIService:
         else:
             samples = filenames[:actual_sample]
         
+        # 移除文件后缀后再发送给AI分析
+        # 这样AI生成的正则不会包含后缀，匹配更准确
+        samples_without_ext = [self._strip_extension(fn) for fn in samples]
+        
         # 构建文件名列表，限制每个文件名长度
-        truncated_samples = [fn[:60] if len(fn) > 60 else fn for fn in samples]
+        truncated_samples = [fn[:60] if len(fn) > 60 else fn for fn in samples_without_ext]
         filename_list = "\n".join([f"- {fn}" for fn in truncated_samples])
         
         # 简化prompt，减少token消耗
-        prompt = f"""分析以下{len(samples)}个小说文件名，生成正则表达式规则。
+        prompt = f"""分析以下{len(samples)}个小说文件名（已去除后缀），生成正则表达式规则。
 
 文件名：
 {filename_list}
@@ -391,7 +413,7 @@ class AIService:
 返回JSON（不要markdown代码块）：
 {{"patterns":[{{"name":"规则名","regex":"正则","title_group":1,"author_group":2}}],"analysis":"分析"}}
 
-要求：正则兼容Python re模块，捕获组1=书名，2=作者。"""
+要求：正则兼容Python re模块，捕获组1=书名，2=作者。正则不需要匹配文件后缀。"""
         
         response = await self.chat([
             {"role": "system", "content": "只返回纯JSON，不要任何解释或markdown。"},

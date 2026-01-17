@@ -85,8 +85,11 @@ export default function LibraryPage() {
   // 加载标签列表
   const loadTags = async () => {
     try {
-      const response = await api.get<{ tags: TagInfo[] }>('/api/tags')
-      setAllTags(response.data.tags || [])
+      // API 直接返回标签数组，不是 { tags: [...] } 格式
+      const response = await api.get<TagInfo[]>('/api/tags')
+      // 处理两种可能的返回格式
+      const tags = Array.isArray(response.data) ? response.data : (response.data as any).tags || []
+      setAllTags(tags)
     } catch (err) {
       console.error('加载标签失败:', err)
     }
