@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_async_session
+from app.database import get_db
 from app.models import Annotation, Book, User
 from app.web.routes.dependencies import get_current_user
 
@@ -71,7 +71,7 @@ class AnnotationExport(BaseModel):
 @router.post("", response_model=AnnotationResponse)
 async def create_annotation(
     data: AnnotationCreate,
-    db: AsyncSession = Depends(get_async_session),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
@@ -133,7 +133,7 @@ async def get_book_annotations(
     book_id: int,
     chapter_index: Optional[int] = None,
     annotation_type: Optional[str] = None,
-    db: AsyncSession = Depends(get_async_session),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
@@ -166,7 +166,7 @@ async def get_book_annotations(
 async def get_chapter_annotations(
     book_id: int,
     chapter_index: int,
-    db: AsyncSession = Depends(get_async_session),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
@@ -189,7 +189,7 @@ async def get_chapter_annotations(
 @router.get("/{annotation_id}", response_model=AnnotationResponse)
 async def get_annotation(
     annotation_id: int,
-    db: AsyncSession = Depends(get_async_session),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
@@ -214,7 +214,7 @@ async def get_annotation(
 async def update_annotation(
     annotation_id: int,
     data: AnnotationUpdate,
-    db: AsyncSession = Depends(get_async_session),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
@@ -255,7 +255,7 @@ async def update_annotation(
 @router.delete("/{annotation_id}")
 async def delete_annotation(
     annotation_id: int,
-    db: AsyncSession = Depends(get_async_session),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
@@ -282,7 +282,7 @@ async def delete_annotation(
 @router.get("/book/{book_id}/export", response_model=AnnotationExport)
 async def export_book_annotations(
     book_id: int,
-    db: AsyncSession = Depends(get_async_session),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
@@ -317,7 +317,7 @@ async def export_book_annotations(
 
 @router.get("/my/stats")
 async def get_annotation_stats(
-    db: AsyncSession = Depends(get_async_session),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
@@ -370,7 +370,7 @@ async def get_annotation_stats(
 @router.get("/my/recent", response_model=List[AnnotationResponse])
 async def get_recent_annotations(
     limit: int = Query(default=20, le=100),
-    db: AsyncSession = Depends(get_async_session),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
@@ -391,7 +391,7 @@ async def get_recent_annotations(
 @router.delete("/book/{book_id}/all")
 async def delete_all_book_annotations(
     book_id: int,
-    db: AsyncSession = Depends(get_async_session),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
