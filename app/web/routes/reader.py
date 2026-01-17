@@ -253,8 +253,11 @@ async def get_chapter_content(
 
 
 async def _read_txt_file(file_path: Path) -> Optional[str]:
-    """读取TXT文件内容（支持多种编码）"""
-    encodings = ['utf-8', 'gbk', 'gb2312', 'gb18030']
+    """读取TXT文件内容（支持多种编码和自动检测）"""
+    import chardet
+    
+    # 1. 尝试常见编码
+    encodings = ['utf-8', 'gbk', 'gb2312', 'gb18030', 'big5', 'utf-16']
     
     for encoding in encodings:
         try:
@@ -263,6 +266,21 @@ async def _read_txt_file(file_path: Path) -> Optional[str]:
             return _clean_txt_content(content)
         except UnicodeDecodeError:
             continue
+            
+    # 2. 使用 chardet 自动检测
+    try:
+        with open(file_path, 'rb') as f:
+            raw_data = f.read(10000)  # 读取前10KB进行检测
+            result = chardet.detect(raw_data)
+            detected_encoding = result['encoding']
+            
+            if detected_encoding and detected_encoding.lower() not in encodings:
+                log.info(f"自动检测到编码: {detected_encoding} for {file_path}")
+                with open(file_path, 'r', encoding=detected_encoding) as f:
+                    content = f.read()
+                return _clean_txt_content(content)
+    except Exception as e:
+        log.error(f"自动检测编码失败: {e}")
     
     return None
 
@@ -329,16 +347,18 @@ async def _read_txt_content(file_path: Path, page: int = 0) -> dict:
         page: 页码（从0开始）
     """
     import re
+    import chardet
     
     try:
         file_size = file_path.stat().st_size
         is_large_file = file_size > LARGE_FILE_THRESHOLD
         
         # 尝试多种编码
-        encodings = ['utf-8', 'gbk', 'gb2312', 'gb18030']
+        encodings = ['utf-8', 'gbk', 'gb2312', 'gb18030', 'big5', 'utf-16']
         content = None
         used_encoding = None
         
+        # 1. 尝试常见编码
         for encoding in encodings:
             try:
                 with open(file_path, 'r', encoding=encoding) as f:
@@ -348,6 +368,22 @@ async def _read_txt_content(file_path: Path, page: int = 0) -> dict:
             except UnicodeDecodeError:
                 continue
         
+        # 2. 自动检测编码
+        if content is None:
+            try:
+                with open(file_path, 'rb') as f:
+                    raw_data = f.read(10000)
+                    result = chardet.detect(raw_data)
+                    detected_encoding = result['encoding']
+                    
+                    if detected_encoding:
+                        log.info(f"自动检测到编码: {detected_encoding} for {file_path}")
+                        with open(file_path, 'r', encoding=detected_encoding) as f:
+                            content = f.read()
+                        used_encoding = detected_encoding
+            except Exception as e:
+                log.error(f"自动检测编码失败: {e}")
+
         if content is None:
             raise HTTPException(
                 status_code=500,

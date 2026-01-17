@@ -9,6 +9,7 @@ from telegram import BotCommand
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 from app.config import settings
+from app.web.routes.settings import load_telegram_settings
 from app.database import get_db
 from app.utils.logger import logger
 from app.bot.handlers import (
@@ -33,11 +34,18 @@ class TelegramBot:
     
     async def start(self):
         """启动 Bot"""
-        if not settings.telegram.enabled:
+        # 动态加载配置
+        tg_settings = load_telegram_settings()
+        enabled = tg_settings.get("enabled", False)
+        bot_token = tg_settings.get("bot_token", "")
+        webhook_url = tg_settings.get("webhook_url", "")
+        webhook_path = settings.telegram.webhook_path  # 路径通常保持静态配置
+
+        if not enabled:
             logger.info("Telegram Bot 未启用")
             return
         
-        if not settings.telegram.bot_token:
+        if not bot_token:
             logger.warning("Telegram Bot Token 未配置")
             return
         
@@ -45,7 +53,7 @@ class TelegramBot:
             # 创建 Application
             self.application = (
                 Application.builder()
-                .token(settings.telegram.bot_token)
+                .token(bot_token)
                 .build()
             )
             
@@ -78,12 +86,12 @@ class TelegramBot:
             await self.application.bot.set_my_commands(commands)
             
             # 启动 Bot
-            if settings.telegram.webhook_url:
+            if webhook_url:
                 # Webhook 模式
-                logger.info(f"Telegram Bot 启动 (Webhook 模式): {settings.telegram.webhook_url}")
+                logger.info(f"Telegram Bot 启动 (Webhook 模式): {webhook_url}")
                 await self.application.start()
                 await self.application.bot.set_webhook(
-                    url=f"{settings.telegram.webhook_url}{settings.telegram.webhook_path}"
+                    url=f"{webhook_url}{webhook_path}"
                 )
             else:
                 # 轮询模式
