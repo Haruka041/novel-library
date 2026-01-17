@@ -9,7 +9,8 @@ import {
 import {
   ArrowBack, Menu, Settings, TextFields, FormatLineSpacing,
   ChevronLeft, ChevronRight, Fullscreen, FullscreenExit,
-  PlayArrow, Stop, Timer, SpaceBar
+  PlayArrow, Stop, Timer, SpaceBar, Bookmark, BookmarkBorder,
+  Delete, Add
 } from '@mui/icons-material'
 import ePub, { Book, Rendition } from 'epubjs'
 import api from '../services/api'
@@ -47,6 +48,17 @@ interface FontInfo {
   family: string
   is_builtin: boolean
   file_url?: string
+}
+
+interface BookmarkInfo {
+  id: number
+  book_id: number
+  book_title: string
+  position: string
+  chapter_title: string | null
+  note: string | null
+  created_at: string
+  updated_at: string
 }
 
 // 主题预设 (静读天下风格 - 8种主题)
@@ -112,6 +124,11 @@ export default function ReaderPage() {
   // 抽屉
   const [tocOpen, setTocOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [bookmarksOpen, setBookmarksOpen] = useState(false)
+  
+  // 书签
+  const [bookmarks, setBookmarks] = useState<BookmarkInfo[]>([])
+  const [loadingBookmarks, setLoadingBookmarks] = useState(false)
   
   // 进度 - 基于章节号+章节内偏移
   const [progress, setProgress] = useState(0)
@@ -705,6 +722,90 @@ export default function ReaderPage() {
     }
   }
 
+  // 书签功能
+  const loadBookmarks = async () => {
+    if (!id) return
+    try {
+      setLoadingBookmarks(true)
+      const response = await api.get<BookmarkInfo[]>(`/api/books/${id}/bookmarks`)
+      setBookmarks(response.data)
+    } catch (err) {
+      console.error('加载书签失败:', err)
+    } finally {
+      setLoadingBookmarks(false)
+    }
+  }
+
+  const addBookmark = async () => {
+    if (!id) return
+    try {
+      // 获取当前章节标题
+      const chapterTitle = chapters[currentChapter]?.title || `第${currentChapter + 1}章`
+      
+      // 计算当前滚动偏移
+      let scrollOffset = 0
+      if (contentRef.current) {
+        const chapterEl = chapterRefs.current.get(currentChapter)
+        if (chapterEl) {
+          const containerRect = contentRef.current.getBoundingClientRect()
+          const chapterRect = chapterEl.getBoundingClientRect()
+          scrollOffset = Math.max(0, containerRect.top - chapterRect.top)
+        }
+      }
+      
+      const position = `${currentChapter}:${Math.round(scrollOffset)}`
+      
+      await api.post('/api/bookmarks', {
+        book_id: parseInt(id),
+        position: position,
+        chapter_title: chapterTitle,
+        note: null
+      })
+      
+      // 重新加载书签列表
+      await loadBookmarks()
+    } catch (err) {
+      console.error('添加书签失败:', err)
+    }
+  }
+
+  const deleteBookmark = async (bookmarkId: number) => {
+    try {
+      await api.delete(`/api/bookmarks/${bookmarkId}`)
+      setBookmarks(prev => prev.filter(b => b.id !== bookmarkId))
+    } catch (err) {
+      console.error('删除书签失败:', err)
+    }
+  }
+
+  const goToBookmark = (bookmark: BookmarkInfo) => {
+    setBookmarksOpen(false)
+    
+    // 解析位置信息
+    const parts = bookmark.position.split(':')
+    const chapterIndex = parseInt(parts[0]) || 0
+    const scrollOffset = parseInt(parts[1]) || 0
+    
+    // 保存待恢复的偏移
+    pendingScrollOffsetRef.current = scrollOffset
+    
+    // 如果章节在已加载范围内，直接滚动
+    if (chapterIndex >= loadedRange.start && chapterIndex <= loadedRange.end) {
+      scrollToChapter(chapterIndex, scrollOffset)
+    } else {
+      // 需要重新加载
+      loadChapterContent(chapterIndex)
+    }
+  }
+
+  // 检查当前位置是否已有书签
+  const hasBookmarkAtCurrentPosition = () => {
+    return bookmarks.some(b => {
+      const parts = b.position.split(':')
+      return parseInt(parts[0]) === currentChapter
+    })
+  }
+
   const epubPrev = () => epubRendition?.prev()
   const epubNext = () => epubRendition?.next()
 
@@ -831,8 +932,35 @@ export default function ReaderPage() {
             {isFullscreen ? <FullscreenExit /> : <Fullscreen />}
           </IconButton>
           
+          {/* 书签按钮 */}
+          {!isEpub && (
+            <IconButton 
+              color="inherit" 
+              onClick={(e) => { 
+                e.stopPropagation()
+                if (hasBookmarkAtCurrentPosition()) {
+                  // 已有书签，打开书签列表
+                  loadBookmarks()
+                  setBookmarksOpen(true)
+                } else {
+                  // 添加书签
+                  addBookmark()
+                }
+              }}
+            >
+              {hasBookmarkAtCurrentPosition() ? <Bookmark /> : <BookmarkBorder />}
+            </IconButton>
+          )}
+          
           <IconButton color="inherit" onClick={(e) => { e.stopPropagation(); setTocOpen(true) }}>
             <Menu />
+          </IconButton>
+          <IconButton color="inherit" onClick={(e) => { 
+            e.stopPropagation()
+            loadBookmarks()
+            setBookmarksOpen(true)
+          }}>
+            <Bookmark />
           </IconButton>
           <IconButton color="inherit" onClick={(e) => { e.stopPropagation(); setSettingsOpen(true) }}>
             <Settings />
@@ -1139,6 +1267,93 @@ export default function ReaderPage() {
               </Typography>
             )}
           </Box>
+        </Box>
+      </Drawer>
+
+      {/* 书签抽屉 */}
+      <Drawer anchor="right" open={bookmarksOpen} onClose={() => setBookmarksOpen(false)} onClick={(e) => e.stopPropagation()}>
+        <Box sx={{ width: 320, p: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+            <Typography variant="h6">
+              书签 ({bookmarks.length})
+            </Typography>
+            {!isEpub && (
+              <IconButton onClick={addBookmark} color="primary" size="small">
+                <Add />
+              </IconButton>
+            )}
+          </Box>
+          
+          {loadingBookmarks ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+              <CircularProgress size={24} />
+            </Box>
+          ) : bookmarks.length === 0 ? (
+            <Box sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>
+              <BookmarkBorder sx={{ fontSize: 48, opacity: 0.5 }} />
+              <Typography variant="body2" sx={{ mt: 1 }}>
+                暂无书签
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                点击工具栏书签图标添加
+              </Typography>
+            </Box>
+          ) : (
+            <List sx={{ maxHeight: 'calc(100vh - 150px)', overflow: 'auto' }}>
+              {bookmarks.map((bookmark) => {
+                const parts = bookmark.position.split(':')
+                const chapterIndex = parseInt(parts[0]) || 0
+                const isCurrentChapter = chapterIndex === currentChapter
+                
+                return (
+                  <ListItem 
+                    key={bookmark.id} 
+                    disablePadding
+                    secondaryAction={
+                      <IconButton 
+                        edge="end" 
+                        size="small"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          deleteBookmark(bookmark.id)
+                        }}
+                      >
+                        <Delete fontSize="small" />
+                      </IconButton>
+                    }
+                  >
+                    <ListItemButton
+                      selected={isCurrentChapter}
+                      onClick={() => goToBookmark(bookmark)}
+                      sx={{ pr: 6 }}
+                    >
+                      <ListItemText
+                        primary={bookmark.chapter_title || `第${chapterIndex + 1}章`}
+                        secondary={
+                          <Box component="span">
+                            <Typography variant="caption" component="span" sx={{ display: 'block' }}>
+                              {new Date(bookmark.created_at).toLocaleDateString('zh-CN', {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })}
+                            </Typography>
+                            {bookmark.note && (
+                              <Typography variant="caption" component="span" sx={{ display: 'block', color: 'text.secondary' }}>
+                                {bookmark.note}
+                              </Typography>
+                            )}
+                          </Box>
+                        }
+                        primaryTypographyProps={{ noWrap: true, fontSize: 14 }}
+                      />
+                    </ListItemButton>
+                  </ListItem>
+                )
+              })}
+            </List>
+          )}
         </Box>
       </Drawer>
     </Box>
