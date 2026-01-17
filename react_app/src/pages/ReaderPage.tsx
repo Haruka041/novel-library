@@ -752,6 +752,11 @@ export default function ReaderPage() {
           sx={{
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
+            fontSize: fontSize,
+            lineHeight: lineHeight,
+            fontFamily: fontFamily,
+            letterSpacing: `${letterSpacing}px`,
+            marginBottom: `${paragraphSpacing}em`,
           }}
         >
           {chapter.content}
