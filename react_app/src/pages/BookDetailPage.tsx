@@ -10,7 +10,7 @@ import {
   ArrowBack, MenuBook, Download, Favorite, FavoriteBorder,
   AccessTime, Storage, PlayArrow, CheckCircle, Schedule,
   Edit, LocalOffer, Layers, Star, StarBorder, Delete,
-  Link, LinkOff, Collections
+  Link, LinkOff, Collections, Notes, FileDownload
 } from '@mui/icons-material'
 import api from '../services/api'
 import { useAuthStore } from '../stores/authStore'
@@ -132,6 +132,10 @@ export default function BookDetailPage() {
   const [loadingGroup, setLoadingGroup] = useState(false)
   const [ungrouping, setUngrouping] = useState(false)
   const [imageError, setImageError] = useState(false)
+  
+  // 批注相关
+  const [annotationCount, setAnnotationCount] = useState(0)
+  const [exportingAnnotations, setExportingAnnotations] = useState(false)
 
   // 设置页面标题 - 必须在条件return之前调用
   useDocumentTitle(book?.title || '书籍详情')
@@ -141,6 +145,7 @@ export default function BookDetailPage() {
       loadBook()
       checkFavoriteStatus()
       loadReadingProgress()
+      loadAnnotationCount()
     }
   }, [id])
 
@@ -188,6 +193,57 @@ export default function BookDetailPage() {
       setAllTags(response.data)
     } catch (err) {
       console.error('加载标签列表失败:', err)
+    }
+  }
+
+  const loadAnnotationCount = async () => {
+    try {
+      const response = await api.get(`/api/annotations/book/${id}`)
+      setAnnotationCount(response.data?.length || 0)
+    } catch (err) {
+      // 可能没有批注，不需要报错
+      console.debug('没有批注')
+    }
+  }
+
+  const handleExportAnnotations = async () => {
+    try {
+      setExportingAnnotations(true)
+      const response = await api.get(`/api/annotations/book/${id}/export`)
+      const data = response.data
+      
+      // 生成导出内容
+      let content = `# ${data.book_title} - 批注导出\n\n`
+      content += `导出时间: ${new Date(data.exported_at).toLocaleString()}\n`
+      content += `批注总数: ${data.total_annotations}\n\n`
+      content += `---\n\n`
+      
+      data.annotations.forEach((annotation: any, index: number) => {
+        content += `## ${index + 1}. ${annotation.chapter_title || '未知章节'}\n\n`
+        content += `> ${annotation.selected_text}\n\n`
+        if (annotation.note) {
+          content += `📝 **笔记**: ${annotation.note}\n\n`
+        }
+        content += `🏷️ 类型: ${annotation.annotation_type} | 颜色: ${annotation.color}\n`
+        content += `📅 创建时间: ${new Date(annotation.created_at).toLocaleString()}\n\n`
+        content += `---\n\n`
+      })
+      
+      // 下载文件
+      const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${data.book_title}-批注导出.md`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (err: any) {
+      console.error('导出批注失败:', err)
+      alert(err.response?.data?.detail || '导出失败')
+    } finally {
+      setExportingAnnotations(false)
     }
   }
 
@@ -575,6 +631,17 @@ export default function BookDetailPage() {
             >
               书籍组
             </Button>
+            {annotationCount > 0 && (
+              <Button
+                variant="outlined"
+                size="large"
+                startIcon={exportingAnnotations ? <CircularProgress size={20} /> : <Notes />}
+                onClick={handleExportAnnotations}
+                disabled={exportingAnnotations}
+              >
+                导出批注 ({annotationCount})
+              </Button>
+            )}
             <IconButton
               onClick={toggleFavorite}
               color={isFavorite ? 'error' : 'default'}

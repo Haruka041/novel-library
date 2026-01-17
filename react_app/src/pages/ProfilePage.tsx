@@ -1,5 +1,5 @@
-import { Box, Typography, Card, CardContent, Avatar, Divider, List, ListItem, ListItemIcon, ListItemText, ToggleButtonGroup, ToggleButton, Chip, Button, IconButton, CircularProgress, Snackbar, Alert, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material'
-import { Person, Lock, History, Favorite, DarkMode, LightMode, SettingsBrightness, Logout, PhotoSizeSelectLarge, ViewList, AllInclusive, Palette, Image, Check, Telegram, Link, LinkOff, ContentCopy, CheckCircle, TrendingUp } from '@mui/icons-material'
+import { Box, Typography, Card, CardContent, Avatar, Divider, List, ListItem, ListItemIcon, ListItemText, ToggleButtonGroup, ToggleButton, Chip, Button, IconButton, CircularProgress, Snackbar, Alert, Dialog, DialogTitle, DialogContent, DialogActions, Grid, Paper } from '@mui/material'
+import { Person, Lock, History, Favorite, DarkMode, LightMode, SettingsBrightness, Logout, PhotoSizeSelectLarge, ViewList, AllInclusive, Palette, Image, Check, Telegram, Link, LinkOff, ContentCopy, CheckCircle, TrendingUp, Notes, Bookmark, FormatQuote, MenuBook } from '@mui/icons-material'
 import { useAuthStore } from '../stores/authStore'
 import { useThemeStore, PRESET_COLORS } from '../stores/themeStore'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -22,6 +22,25 @@ export default function ProfilePage() {
     severity: 'success'
   })
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // 批注统计状态
+  const [annotationStats, setAnnotationStats] = useState<{
+    total_annotations: number
+    by_type: Record<string, number>
+    by_color: Record<string, number>
+    books_with_annotations: number
+  } | null>(null)
+  const [recentAnnotations, setRecentAnnotations] = useState<Array<{
+    id: number
+    book_id: number
+    chapter_title: string | null
+    selected_text: string
+    note: string | null
+    annotation_type: string
+    color: string
+    updated_at: string
+  }>>([])
+  const [annotationsLoading, setAnnotationsLoading] = useState(true)
 
   // Telegram 绑定状态
   const [telegramStatus, setTelegramStatus] = useState<{
@@ -52,6 +71,26 @@ export default function ProfilePage() {
       }
     }
     fetchStats()
+  }, [])
+
+  // 获取批注统计和最近批注
+  useEffect(() => {
+    const fetchAnnotations = async () => {
+      try {
+        setAnnotationsLoading(true)
+        const [statsRes, recentRes] = await Promise.all([
+          api.get('/api/annotations/my/stats'),
+          api.get('/api/annotations/my/recent', { params: { limit: 5 } })
+        ])
+        setAnnotationStats(statsRes.data)
+        setRecentAnnotations(recentRes.data)
+      } catch (error) {
+        console.error('获取批注数据失败:', error)
+      } finally {
+        setAnnotationsLoading(false)
+      }
+    }
+    fetchAnnotations()
   }, [])
 
   // 获取 Telegram 绑定状态
@@ -377,6 +416,163 @@ export default function ProfilePage() {
               >
                 {bindCodeLoading ? '生成中...' : '获取绑定码'}
               </Button>
+            </Box>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 批注统计卡片 */}
+      <Card sx={{ mb: 3 }}>
+        <CardContent>
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+            <Notes sx={{ mr: 1, color: 'primary.main' }} />
+            <Typography variant="h6">我的批注</Typography>
+          </Box>
+          
+          {annotationsLoading ? (
+            <Box display="flex" alignItems="center" gap={1}>
+              <CircularProgress size={20} />
+              <Typography variant="body2" color="text.secondary">加载中...</Typography>
+            </Box>
+          ) : annotationStats && annotationStats.total_annotations > 0 ? (
+            <>
+              {/* 统计卡片 */}
+              <Grid container spacing={2} sx={{ mb: 3 }}>
+                <Grid item xs={6} sm={3}>
+                  <Paper variant="outlined" sx={{ p: 2, textAlign: 'center' }}>
+                    <Typography variant="h4" color="primary.main" fontWeight="bold">
+                      {annotationStats.total_annotations}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      总批注数
+                    </Typography>
+                  </Paper>
+                </Grid>
+                <Grid item xs={6} sm={3}>
+                  <Paper variant="outlined" sx={{ p: 2, textAlign: 'center' }}>
+                    <Typography variant="h4" color="warning.main" fontWeight="bold">
+                      {annotationStats.by_type?.highlight || 0}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      高亮
+                    </Typography>
+                  </Paper>
+                </Grid>
+                <Grid item xs={6} sm={3}>
+                  <Paper variant="outlined" sx={{ p: 2, textAlign: 'center' }}>
+                    <Typography variant="h4" color="info.main" fontWeight="bold">
+                      {annotationStats.by_type?.note || 0}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      笔记
+                    </Typography>
+                  </Paper>
+                </Grid>
+                <Grid item xs={6} sm={3}>
+                  <Paper variant="outlined" sx={{ p: 2, textAlign: 'center' }}>
+                    <Typography variant="h4" color="secondary.main" fontWeight="bold">
+                      {annotationStats.books_with_annotations}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      有批注的书籍
+                    </Typography>
+                  </Paper>
+                </Grid>
+              </Grid>
+              
+              {/* 颜色分布 */}
+              {annotationStats.by_color && Object.keys(annotationStats.by_color).length > 0 && (
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
+                    颜色分布
+                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                    {Object.entries(annotationStats.by_color).map(([color, count]) => (
+                      <Chip
+                        key={color}
+                        label={`${count}`}
+                        size="small"
+                        sx={{
+                          bgcolor: color === 'yellow' ? '#FFF9C4' :
+                                   color === 'green' ? '#C8E6C9' :
+                                   color === 'blue' ? '#BBDEFB' :
+                                   color === 'red' ? '#FFCDD2' :
+                                   color === 'purple' ? '#E1BEE7' : 'grey.300',
+                          color: 'text.primary'
+                        }}
+                      />
+                    ))}
+                  </Box>
+                </Box>
+              )}
+              
+              {/* 最近批注 */}
+              {recentAnnotations.length > 0 && (
+                <Box>
+                  <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
+                    最近批注
+                  </Typography>
+                  <List disablePadding>
+                    {recentAnnotations.map((annotation) => (
+                      <ListItem
+                        key={annotation.id}
+                        button
+                        onClick={() => navigate(`/book/${annotation.book_id}`)}
+                        sx={{
+                          borderLeft: 3,
+                          borderColor: annotation.color === 'yellow' ? '#FFC107' :
+                                       annotation.color === 'green' ? '#4CAF50' :
+                                       annotation.color === 'blue' ? '#2196F3' :
+                                       annotation.color === 'red' ? '#F44336' :
+                                       annotation.color === 'purple' ? '#9C27B0' : 'grey.400',
+                          mb: 1,
+                          bgcolor: 'action.hover',
+                          borderRadius: 1
+                        }}
+                      >
+                        <ListItemIcon sx={{ minWidth: 36 }}>
+                          {annotation.annotation_type === 'note' ? (
+                            <Notes fontSize="small" />
+                          ) : (
+                            <FormatQuote fontSize="small" />
+                          )}
+                        </ListItemIcon>
+                        <ListItemText
+                          primary={
+                            <Typography variant="body2" noWrap sx={{ fontStyle: 'italic' }}>
+                              "{annotation.selected_text}"
+                            </Typography>
+                          }
+                          secondary={
+                            <>
+                              {annotation.note && (
+                                <Typography variant="caption" component="span" display="block" noWrap>
+                                  📝 {annotation.note}
+                                </Typography>
+                              )}
+                              {annotation.chapter_title && (
+                                <Typography variant="caption" color="text.secondary">
+                                  {annotation.chapter_title}
+                                </Typography>
+                              )}
+                            </>
+                          }
+                        />
+                      </ListItem>
+                    ))}
+                  </List>
+                </Box>
+              )}
+            </>
+          ) : (
+            <Box sx={{ textAlign: 'center', py: 3 }}>
+              <FormatQuote sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }} />
+              <Typography variant="body2" color="text.secondary">
+                暂无批注记录
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                在阅读时选中文本可以创建高亮和笔记
+              </Typography>
             </Box>
           )}
         </CardContent>
