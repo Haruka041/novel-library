@@ -1,4 +1,4 @@
- """
+"""
 AI 配置 API 路由
 """
 import re
