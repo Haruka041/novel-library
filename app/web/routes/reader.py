@@ -148,9 +148,114 @@ def _parse_chapters(content: str) -> list:
     return chapters
 
 
+@router.get("/books/{book_id}/chapter/{chapter_index}")
+async def get_chapter_content(
+    chapter_index: int,
+    buffer: int = Query(1, ge=0, le=3, description="前后缓冲章节数"),
+    book: Book = Depends(get_accessible_book),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    获取指定章节及前后缓冲章节的内容
+    
+    参数:
+    - chapter_index: 章节索引（从0开始）
+    - buffer: 前后各加载多少章作为缓冲（默认1，即加载前后各1章）
+    
+    返回:
+    - chapters: 章节内容列表（包含当前章节及缓冲章节）
+    - currentIndex: 当前章节在返回列表中的索引
+    - totalChapters: 全书总章节数
+    """
+    from sqlalchemy.orm import selectinload
+    
+    await db.refresh(book, ['versions'])
+    
+    primary_version = None
+    if book.versions:
+        primary_version = next((v for v in book.versions if v.is_primary), None)
+        if not primary_version:
+            primary_version = book.versions[0] if book.versions else None
+    
+    if not primary_version:
+        raise HTTPException(status_code=404, detail="书籍没有可用的文件版本")
+    
+    file_path = Path(primary_version.file_path)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="文件不存在")
+    
+    file_format = primary_version.file_format.lower()
+    
+    if file_format not in ['txt', '.txt']:
+        raise HTTPException(status_code=400, detail="此API仅支持TXT格式")
+    
+    # 读取文件内容
+    content = await _read_txt_file(file_path)
+    if content is None:
+        raise HTTPException(status_code=500, detail="无法解码文件内容")
+    
+    # 解析章节
+    all_chapters = _parse_chapters(content)
+    total_chapters = len(all_chapters)
+    
+    if chapter_index < 0 or chapter_index >= total_chapters:
+        raise HTTPException(status_code=400, detail=f"章节索引超出范围，有效范围: 0-{total_chapters-1}")
+    
+    # 计算加载范围（当前章节 ± buffer）
+    start_index = max(0, chapter_index - buffer)
+    end_index = min(total_chapters, chapter_index + buffer + 1)
+    
+    # 提取章节内容
+    result_chapters = []
+    for i in range(start_index, end_index):
+        ch = all_chapters[i]
+        chapter_content = content[ch["startOffset"]:ch["endOffset"]]
+        # 移除章节标题（因为会单独显示）
+        chapter_content = chapter_content.replace(ch["title"], "", 1).strip()
+        result_chapters.append({
+            "index": i,
+            "title": ch["title"],
+            "content": chapter_content,
+            "startOffset": ch["startOffset"],
+            "endOffset": ch["endOffset"]
+        })
+    
+    # 当前章节在返回列表中的位置
+    current_index_in_result = chapter_index - start_index
+    
+    return {
+        "format": "txt",
+        "chapters": result_chapters,
+        "currentIndex": current_index_in_result,
+        "requestedChapterIndex": chapter_index,
+        "totalChapters": total_chapters,
+        "totalLength": len(content),
+        "loadedRange": {
+            "start": start_index,
+            "end": end_index - 1
+        }
+    }
+
+
+async def _read_txt_file(file_path: Path) -> Optional[str]:
+    """读取TXT文件内容（支持多种编码）"""
+    encodings = ['utf-8', 'gbk', 'gb2312', 'gb18030']
+    
+    for encoding in encodings:
+        try:
+            with open(file_path, 'r', encoding=encoding) as f:
+                content = f.read()
+            return _clean_txt_content(content)
+        except UnicodeDecodeError:
+            continue
+    
+    return None
+
+
 @router.get("/books/{book_id}/content")
 async def get_book_content(
-    page: int = Query(0, ge=0, description="页码，从0开始"),
+    page: int = Query(0, ge=0, description="页码，从0开始（兼容旧API）"),
     book: Book = Depends(get_accessible_book),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)

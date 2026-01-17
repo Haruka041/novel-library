@@ -1,7 +1,9 @@
+import { useEffect } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { Box, AppBar, Toolbar, Typography, IconButton, Avatar, BottomNavigation, BottomNavigationAction, useMediaQuery, useTheme } from '@mui/material'
 import { Home, LibraryBooks, Person, Search } from '@mui/icons-material'
 import { useAuthStore } from '../stores/authStore'
+import { useSettingsStore } from '../stores/settingsStore'
 
 const MainLayout = () => {
   const navigate = useNavigate()
@@ -9,6 +11,12 @@ const MainLayout = () => {
   const theme = useTheme()
   const isMobile = useMediaQuery(theme.breakpoints.down('md'))
   const user = useAuthStore((state) => state.user)
+  const { serverName, loadServerSettings } = useSettingsStore()
+
+  // 加载服务器设置
+  useEffect(() => {
+    loadServerSettings()
+  }, [loadServerSettings])
 
   const getNavValue = () => {
     if (location.pathname.startsWith('/home')) return 0
@@ -20,13 +28,21 @@ const MainLayout = () => {
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
       {/* Top AppBar */}
-      <AppBar position="fixed" sx={{ bgcolor: 'background.paper' }}>
+      <AppBar position="fixed" sx={{ bgcolor: 'background.paper', borderBottom: 1, borderColor: 'divider' }}>
         <Toolbar>
-          <Typography variant="h6" sx={{ flexGrow: 1, cursor: 'pointer' }} onClick={() => navigate('/home')}>
-            📚 小说书库
+          <Typography 
+            variant="h6" 
+            sx={{ 
+              flexGrow: 1, 
+              cursor: 'pointer',
+              color: 'text.primary',  // 确保文字颜色跟随主题
+            }} 
+            onClick={() => navigate('/home')}
+          >
+            📚 {serverName}
           </Typography>
           
-          <IconButton onClick={() => navigate('/search')}>
+          <IconButton onClick={() => navigate('/search')} sx={{ color: 'text.primary' }}>
             <Search />
           </IconButton>
           

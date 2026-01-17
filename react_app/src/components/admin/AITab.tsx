@@ -61,10 +61,12 @@ export default function AITab() {
   const [apiKey, setApiKey] = useState('')
   const [apiBase, setApiBase] = useState('')
   const [model, setModel] = useState('gpt-3.5-turbo')
+  const [customModel, setCustomModel] = useState('')
   const [maxTokens, setMaxTokens] = useState(2000)
   const [temperature, setTemperature] = useState(0.7)
   const [timeout, setTimeout] = useState(30)
   const [enabled, setEnabled] = useState(false)
+  const [hasApiKey, setHasApiKey] = useState(false)
   
   const [features, setFeatures] = useState<AIFeaturesConfig>({
     metadata_enhancement: true,
@@ -270,21 +272,42 @@ export default function AITab() {
               <FormControl fullWidth>
                 <InputLabel>模型</InputLabel>
                 <Select
-                  value={model}
+                  value={currentModels.some(m => m.id === model) ? model : '__custom__'}
                   label="模型"
-                  onChange={(e) => setModel(e.target.value)}
+                  onChange={(e) => {
+                    if (e.target.value === '__custom__') {
+                      // 保持当前自定义模型
+                    } else {
+                      setModel(e.target.value)
+                      setCustomModel('')
+                    }
+                  }}
                 >
                   {currentModels.map((m) => (
                     <MenuItem key={m.id} value={m.id}>
                       {m.name}
                     </MenuItem>
                   ))}
-                  <MenuItem value={model}>
-                    <em>{model} (自定义)</em>
+                  <MenuItem value="__custom__">
+                    <em>自定义模型...</em>
                   </MenuItem>
                 </Select>
               </FormControl>
             </Grid>
+
+            {/* 自定义模型输入 */}
+            {(!currentModels.some(m => m.id === model) || provider === 'custom') && (
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="模型名称"
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  placeholder="输入模型名称，如 gpt-4, claude-3-opus 等"
+                  helperText="输入您要使用的模型名称"
+                />
+              </Grid>
+            )}
 
             <Grid item xs={12}>
               <TextField

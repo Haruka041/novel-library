@@ -4,12 +4,13 @@ import {
   DialogContent, DialogActions, TextField, Alert, CircularProgress,
   Card, CardContent, Grid, LinearProgress, List, ListItem, ListItemText,
   ListItemSecondaryAction, Switch, Divider, Collapse, Stack, Paper,
-  Table, TableBody, TableCell, TableContainer, TableHead, TableRow
+  Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
+  FormControl, InputLabel, Select, MenuItem
 } from '@mui/material'
 import {
   Add, Edit, Delete, Refresh, FolderOpen, ExpandMore, ExpandLess,
   PlayArrow, Stop, CheckCircle, Error as ErrorIcon, Schedule,
-  Folder, DeleteOutline, AddCircle, LocalOffer, Sync
+  Folder, DeleteOutline, AddCircle, LocalOffer, Sync, Warning
 } from '@mui/icons-material'
 import api from '../../services/api'
 
@@ -78,6 +79,10 @@ export default function LibrariesTab() {
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([])
   const [applyingTags, setApplyingTags] = useState<number | null>(null)
   
+  // 内容分级
+  const [contentRatings, setContentRatings] = useState<Record<number, string>>({})
+  const [applyingContentRating, setApplyingContentRating] = useState<number | null>(null)
+  
   // 对话框状态
   const [dialogOpen, setDialogOpen] = useState(false)
   const [dialogType, setDialogType] = useState<'create' | 'edit'>('create')
@@ -105,11 +110,67 @@ export default function LibrariesTab() {
 
   const loadLibraryTags = async (libraryId: number) => {
     try {
-      const response = await api.get<{ tags: TagInfo[] }>(`/admin/libraries/${libraryId}/tags`)
+      const response = await api.get<{ tags: TagInfo[] }>(`/api/admin/libraries/${libraryId}/tags`)
       setLibraryTags(prev => ({ ...prev, [libraryId]: response.data.tags }))
     } catch (err) {
       console.error('加载书库标签失败:', err)
     }
+  }
+
+  const loadContentRating = async (libraryId: number) => {
+    try {
+      const response = await api.get<{ content_rating: string }>(`/api/admin/libraries/${libraryId}/content-rating`)
+      setContentRatings(prev => ({ ...prev, [libraryId]: response.data.content_rating }))
+    } catch (err) {
+      console.error('加载内容分级失败:', err)
+    }
+  }
+
+  const handleContentRatingChange = async (libraryId: number, rating: string) => {
+    try {
+      await api.put(`/api/admin/libraries/${libraryId}/content-rating`, {
+        content_rating: rating
+      })
+      setContentRatings(prev => ({ ...prev, [libraryId]: rating }))
+    } catch (err: any) {
+      console.error('更新内容分级失败:', err)
+      setError(err.response?.data?.detail || '更新内容分级失败')
+    }
+  }
+
+  const handleApplyContentRating = async (libraryId: number) => {
+    if (!confirm('确定要将书库的内容分级应用到该书库所有书籍吗？这将覆盖现有书籍的分级设置。')) return
+    
+    try {
+      setApplyingContentRating(libraryId)
+      const response = await api.post(`/api/admin/libraries/${libraryId}/apply-content-rating`)
+      alert(`成功应用内容分级！已更新 ${response.data.updated_count} 本书的分级为 "${getContentRatingLabel(response.data.content_rating)}"。`)
+    } catch (err: any) {
+      console.error('应用内容分级失败:', err)
+      setError(err.response?.data?.detail || '应用内容分级失败')
+    } finally {
+      setApplyingContentRating(null)
+    }
+  }
+
+  const getContentRatingLabel = (rating: string) => {
+    const labels: Record<string, string> = {
+      'general': '全年龄',
+      'teen': '青少年 (13+)',
+      'adult': '成人 (18+)',
+      'r18': 'R18'
+    }
+    return labels[rating] || rating
+  }
+
+  const getContentRatingColor = (rating: string) => {
+    const colors: Record<string, 'success' | 'info' | 'warning' | 'error'> = {
+      'general': 'success',
+      'teen': 'info',
+      'adult': 'warning',
+      'r18': 'error'
+    }
+    return colors[rating] || 'default'
   }
 
   // 轮询活动任务
@@ -217,6 +278,9 @@ export default function LibrariesTab() {
       }
       if (!libraryTags[libraryId]) {
         await loadLibraryTags(libraryId)
+      }
+      if (contentRatings[libraryId] === undefined) {
+        await loadContentRating(libraryId)
       }
     }
   }
@@ -352,7 +416,7 @@ export default function LibrariesTab() {
     if (!selectedLibraryForTag) return
     
     try {
-      await api.put(`/admin/libraries/${selectedLibraryForTag}/tags`, {
+      await api.put(`/api/admin/libraries/${selectedLibraryForTag}/tags`, {
         tag_ids: selectedTagIds
       })
       setTagDialogOpen(false)
@@ -368,7 +432,7 @@ export default function LibrariesTab() {
     
     try {
       setApplyingTags(libraryId)
-      const response = await api.post(`/admin/libraries/${libraryId}/apply-tags`)
+      const response = await api.post(`/api/admin/libraries/${libraryId}/apply-tags`)
       alert(`成功应用标签！共处理 ${response.data.books_count} 本书，添加 ${response.data.applied_count} 个标签关联。`)
     } catch (err: any) {
       console.error('应用标签失败:', err)
@@ -629,6 +693,55 @@ export default function LibrariesTab() {
                           ))}
                         </Box>
                       )}
+                    </Box>
+
+                    {/* 内容分级 */}
+                    <Box sx={{ mb: 3 }}>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                          <Warning fontSize="small" />
+                          内容分级
+                        </Typography>
+                        <Button
+                          size="small"
+                          startIcon={<Sync />}
+                          onClick={() => handleApplyContentRating(library.id)}
+                          disabled={applyingContentRating === library.id || !contentRatings[library.id]}
+                        >
+                          {applyingContentRating === library.id ? '应用中...' : '应用到所有书籍'}
+                        </Button>
+                      </Box>
+                      
+                      <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                        新扫描入库的书籍将自动设置此分级，也可手动应用到现有书籍
+                      </Typography>
+                      
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                        <FormControl size="small" sx={{ minWidth: 180 }}>
+                          <InputLabel>内容分级</InputLabel>
+                          <Select
+                            value={contentRatings[library.id] || ''}
+                            label="内容分级"
+                            onChange={(e) => handleContentRatingChange(library.id, e.target.value)}
+                          >
+                            <MenuItem value="">
+                              <em>未设置</em>
+                            </MenuItem>
+                            <MenuItem value="general">全年龄</MenuItem>
+                            <MenuItem value="teen">青少年 (13+)</MenuItem>
+                            <MenuItem value="adult">成人 (18+)</MenuItem>
+                            <MenuItem value="r18">R18</MenuItem>
+                          </Select>
+                        </FormControl>
+                        
+                        {contentRatings[library.id] && (
+                          <Chip
+                            label={getContentRatingLabel(contentRatings[library.id])}
+                            size="small"
+                            color={getContentRatingColor(contentRatings[library.id]) as any}
+                          />
+                        )}
+                      </Box>
                     </Box>
 
                     {/* 扫描历史 */}

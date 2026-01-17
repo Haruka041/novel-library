@@ -68,7 +68,7 @@ app.mount("/static", StaticFiles(directory="app/web/static", html=False), name="
 templates = Jinja2Templates(directory="app/web/templates")
 
 # 导入路由（延迟导入避免循环依赖）
-from app.web.routes import admin, admin_scan, ai, api, auth, bookmarks, dashboard, fonts, opds, pages, permissions, reader, tags, user
+from app.web.routes import admin, admin_scan, ai, api, auth, bookmarks, dashboard, fonts, opds, pages, permissions, reader, settings, tags, user
 
 # 注册路由（必须在挂载静态文件之前）
 app.include_router(auth.router, prefix="/api/auth", tags=["认证"])
@@ -85,6 +85,7 @@ app.include_router(opds.router, prefix="/opds", tags=["OPDS"])
 app.include_router(pages.router, tags=["页面"])
 app.include_router(reader.router, prefix="/api", tags=["阅读器"])
 app.include_router(fonts.router, tags=["字体管理"])
+app.include_router(settings.router, prefix="/api", tags=["系统设置"])
 
 
 # 健康检查端点

@@ -48,6 +48,9 @@ class Library(Base):
     # 访问控制
     is_public = Column(Boolean, default=False)  # 是否为公共书库（所有用户可见）
     scraper_config = Column(Text, nullable=True)  # JSON 存储刮削器配置
+    
+    # 内容分级（扫描时自动应用到新书）
+    content_rating = Column(String(20), default='general')  # 'general', 'teen', 'adult', 'r18'
 
     # 关系
     books = relationship("Book", back_populates="library", cascade="all, delete-orphan")

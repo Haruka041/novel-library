@@ -21,6 +21,14 @@ interface TocChapter {
   endOffset: number
 }
 
+interface LoadedChapter {
+  index: number
+  title: string
+  content: string
+  startOffset: number
+  endOffset: number
+}
+
 interface EpubTocItem {
   label: string
   href: string
@@ -59,30 +67,27 @@ export default function ReaderPage() {
   const token = useAuthStore((state) => state.token)
   const contentRef = useRef<HTMLDivElement>(null)
   const epubViewerRef = useRef<HTMLDivElement>(null)
+  const chapterRefs = useRef<Map<number, HTMLDivElement>>(new Map())
   
   // 状态
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [content, setContent] = useState('')
   const [bookInfo, setBookInfo] = useState<{ title: string; format: string } | null>(null)
   const [isEpub, setIsEpub] = useState(false)
   
-  // 分页加载状态
-  const [currentPage, setCurrentPage] = useState(0)
-  const [totalPages, setTotalPages] = useState(1)
-  const [hasMore, setHasMore] = useState(false)
-  const [loadingMore, setLoadingMore] = useState(false)
-  const [totalLength, setTotalLength] = useState(0)  // 全书总字符数
-  const [loadedEndOffset, setLoadedEndOffset] = useState(0)  // 当前已加载内容的结束偏移
+  // 章节加载状态（新逻辑）
+  const [chapters, setChapters] = useState<TocChapter[]>([])  // 完整目录
+  const [loadedChapters, setLoadedChapters] = useState<LoadedChapter[]>([])  // 已加载的章节内容
+  const [loadedRange, setLoadedRange] = useState<{start: number, end: number}>({start: 0, end: 0})
+  const [currentChapter, setCurrentChapter] = useState(0)
+  const [totalChapters, setTotalChapters] = useState(0)
+  const [totalLength, setTotalLength] = useState(0)
+  const [loadingChapter, setLoadingChapter] = useState(false)
   
   // EPUB 相关
   const [epubBook, setEpubBook] = useState<Book | null>(null)
   const [epubRendition, setEpubRendition] = useState<Rendition | null>(null)
   const [epubToc, setEpubToc] = useState<EpubTocItem[]>([])
-  
-  // TXT 章节 - 使用后端提供的完整目录
-  const [chapters, setChapters] = useState<TocChapter[]>([])
-  const [currentChapter, setCurrentChapter] = useState(0)
   
   // 设置
   const [fontSize, setFontSize] = useState(18)
@@ -107,11 +112,10 @@ export default function ReaderPage() {
   const [tocOpen, setTocOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   
-  // 进度 - 基于全书字符偏移的进度
+  // 进度 - 基于章节号+章节内偏移
   const [progress, setProgress] = useState(0)
-  const [currentOffset, setCurrentOffset] = useState(0)  // 当前阅读位置（字符偏移）
-  const [savedProgress, setSavedProgress] = useState<number | null>(null)
-  const [contentLoaded, setContentLoaded] = useState(false)
+  const [savedChapterIndex, setSavedChapterIndex] = useState<number | null>(null)
+  const [savedChapterOffset, setSavedChapterOffset] = useState<number>(0)
 
   // 阅读计时器
   useEffect(() => {
@@ -136,20 +140,21 @@ export default function ReaderPage() {
   // 保存进度（防抖）
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (progress > 0 && id) {
+      if (currentChapter >= 0 && id && !isEpub) {
         saveProgress()
       }
     }, 1000)
     return () => clearTimeout(timer)
-  }, [progress])
+  }, [currentChapter, progress])
 
   // 页面卸载时保存进度
   useEffect(() => {
     const handleBeforeUnload = () => {
-      if (progress > 0 && id) {
+      if (currentChapter >= 0 && id && !isEpub) {
+        // 使用章节号作为位置信息
         const data = JSON.stringify({
           progress: progress,
-          position: String(currentOffset),
+          position: `${currentChapter}:0`,  // 章节号:章节内偏移
           finished: progress >= 0.98,
         })
         navigator.sendBeacon(
@@ -161,7 +166,7 @@ export default function ReaderPage() {
     
     window.addEventListener('beforeunload', handleBeforeUnload)
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
-  }, [progress, currentOffset, id])
+  }, [progress, currentChapter, id, isEpub])
 
   // 加载字体列表
   useEffect(() => {
@@ -315,17 +320,22 @@ export default function ReaderPage() {
       setError('')
 
       // 加载保存的进度
-      let initialProgress = 0
-      let initialPosition = 0
+      let initialChapterIndex = 0
+      let initialChapterOffset = 0
       try {
         const progressResponse = await api.get<ReadingProgress>(`/api/progress/${id}`)
         if (progressResponse.data.progress > 0) {
-          initialProgress = progressResponse.data.progress
-          setSavedProgress(progressResponse.data.progress)
-          // 解析保存的位置（字符偏移）
+          setProgress(progressResponse.data.progress)
+          // 解析位置信息（格式：章节号:章节内偏移）
           if (progressResponse.data.position) {
-            initialPosition = parseInt(progressResponse.data.position) || 0
+            const parts = progressResponse.data.position.split(':')
+            if (parts.length >= 1) {
+              initialChapterIndex = parseInt(parts[0]) || 0
+              initialChapterOffset = parseInt(parts[1]) || 0
+            }
           }
+          setSavedChapterIndex(initialChapterIndex)
+          setSavedChapterOffset(initialChapterOffset)
         }
       } catch {
         console.log('无保存的阅读进度')
@@ -344,43 +354,9 @@ export default function ReaderPage() {
       } else if (format === 'txt' || format === '.txt') {
         setIsEpub(false)
         // 先加载完整目录
-        const tocData = await loadToc()
-        
-        // 根据保存的进度决定从哪一页开始加载
-        let startPage = 0
-        if (initialPosition > 0 && tocData && tocData.totalLength > 0) {
-          // 根据保存的偏移位置计算起始页
-          startPage = Math.floor(initialPosition / 50000)  // CHARS_PER_PAGE
-          
-          // 同时设置当前章节
-          const chapterIndex = tocData.chapters.findIndex((ch: TocChapter) => 
-            initialPosition >= ch.startOffset && initialPosition < ch.endOffset
-          )
-          if (chapterIndex >= 0) {
-            setCurrentChapter(chapterIndex)
-          }
-          
-          setCurrentOffset(initialPosition)
-          setProgress(initialProgress)
-        } else if (initialProgress > 0 && tocData && tocData.totalLength > 0) {
-          // 如果没有具体位置但有进度，根据进度计算
-          const targetOffset = Math.floor(tocData.totalLength * initialProgress)
-          startPage = Math.floor(targetOffset / 50000)
-          
-          const chapterIndex = tocData.chapters.findIndex((ch: TocChapter) => 
-            targetOffset >= ch.startOffset && targetOffset < ch.endOffset
-          )
-          if (chapterIndex >= 0) {
-            setCurrentChapter(chapterIndex)
-          }
-          
-          setCurrentOffset(targetOffset)
-          setProgress(initialProgress)
-        }
-        
-        // 从计算出的起始页加载内容
-        await loadTxtContent(startPage)
-        setContentLoaded(true)
+        await loadToc()
+        // 然后加载初始章节
+        await loadChapterContent(initialChapterIndex)
       } else {
         setError(`暂不支持 ${format} 格式的在线阅读`)
       }
@@ -393,70 +369,125 @@ export default function ReaderPage() {
   }
 
   // 加载完整目录
-  const loadToc = async (): Promise<{ chapters: TocChapter[]; totalLength: number; totalPages: number } | null> => {
+  const loadToc = async () => {
     try {
       const tocResponse = await api.get(`/api/books/${id}/toc`)
       const data = tocResponse.data
       
       if (data.format === 'txt') {
-        const chapters = data.chapters || []
-        const tocTotalLength = data.totalLength || 0
-        const tocTotalPages = data.totalPages || 1
-        
-        setChapters(chapters)
-        setTotalLength(tocTotalLength)
-        setTotalPages(tocTotalPages)
-        
-        return { chapters, totalLength: tocTotalLength, totalPages: tocTotalPages }
+        setChapters(data.chapters || [])
+        setTotalLength(data.totalLength || 0)
+        setTotalChapters(data.chapters?.length || 0)
       }
-      return null
     } catch (err) {
       console.error('加载目录失败:', err)
-      return null
     }
   }
 
-  // 加载TXT内容
-  const loadTxtContent = async (page: number = 0) => {
+  // 加载章节内容（核心函数）
+  const loadChapterContent = async (chapterIndex: number, buffer: number = 2) => {
+    if (loadingChapter) return
+    
+    // 检查是否已加载
+    if (chapterIndex >= loadedRange.start && chapterIndex <= loadedRange.end) {
+      // 已加载，直接跳转
+      scrollToChapter(chapterIndex)
+      return
+    }
+    
     try {
-      const contentResponse = await api.get(`/api/books/${id}/content`, {
-        params: { page }
+      setLoadingChapter(true)
+      
+      const response = await api.get(`/api/books/${id}/chapter/${chapterIndex}`, {
+        params: { buffer }
       })
-      const data = contentResponse.data
+      
+      const data = response.data
       
       if (data.format === 'txt') {
-        if (page === 0) {
-          setContent(data.content)
-        } else {
-          setContent(prev => prev + data.content)
+        setLoadedChapters(data.chapters)
+        setLoadedRange({
+          start: data.loadedRange.start,
+          end: data.loadedRange.end
+        })
+        setTotalChapters(data.totalChapters)
+        setTotalLength(data.totalLength)
+        setCurrentChapter(chapterIndex)
+        
+        // 计算进度
+        const chapter = data.chapters[data.currentIndex]
+        if (chapter && data.totalLength > 0) {
+          setProgress(chapter.startOffset / data.totalLength)
         }
         
-        setCurrentPage(data.page || 0)
-        setHasMore(data.hasMore || false)
-        setLoadedEndOffset(data.endOffset || data.length || 0)
-        
-        // 如果后端没有返回totalLength，从toc获取
-        if (!totalLength && data.length) {
-          setTotalLength(data.length)
+        // 等待渲染后滚动到目标章节
+        setTimeout(() => {
+          scrollToChapter(chapterIndex)
+        }, 100)
+      }
+    } catch (err) {
+      console.error('加载章节内容失败:', err)
+      setError('加载章节失败')
+    } finally {
+      setLoadingChapter(false)
+    }
+  }
+
+  // 滚动到指定章节
+  const scrollToChapter = (chapterIndex: number) => {
+    const element = chapterRefs.current.get(chapterIndex)
+    if (element && contentRef.current) {
+      element.scrollIntoView({ behavior: 'auto', block: 'start' })
+      setCurrentChapter(chapterIndex)
+    }
+  }
+
+  // 加载更多章节（向前或向后）
+  const loadMoreChapters = async (direction: 'prev' | 'next') => {
+    if (loadingChapter) return
+    
+    let targetIndex: number
+    if (direction === 'prev') {
+      targetIndex = Math.max(0, loadedRange.start - 1)
+      if (targetIndex === loadedRange.start) return // 已经是第一章
+    } else {
+      targetIndex = Math.min(totalChapters - 1, loadedRange.end + 1)
+      if (targetIndex === loadedRange.end) return // 已经是最后一章
+    }
+    
+    try {
+      setLoadingChapter(true)
+      
+      const response = await api.get(`/api/books/${id}/chapter/${targetIndex}`, {
+        params: { buffer: 1 }
+      })
+      
+      const data = response.data
+      
+      if (data.format === 'txt') {
+        // 合并章节
+        if (direction === 'prev') {
+          // 向前加载，把新章节放到开头
+          const newChapters = data.chapters.filter((ch: LoadedChapter) => ch.index < loadedRange.start)
+          setLoadedChapters(prev => [...newChapters, ...prev])
+          setLoadedRange(prev => ({
+            start: data.loadedRange.start,
+            end: prev.end
+          }))
+        } else {
+          // 向后加载，把新章节放到末尾
+          const newChapters = data.chapters.filter((ch: LoadedChapter) => ch.index > loadedRange.end)
+          setLoadedChapters(prev => [...prev, ...newChapters])
+          setLoadedRange(prev => ({
+            start: prev.start,
+            end: data.loadedRange.end
+          }))
         }
       }
     } catch (err) {
-      console.error('加载TXT内容失败:', err)
-      throw err
-    }
-  }
-
-  // 加载更多内容
-  const loadMoreContent = async () => {
-    if (!hasMore || loadingMore) return
-    
-    try {
-      setLoadingMore(true)
-      await loadTxtContent(currentPage + 1)
-    } catch (err) {
-      console.error('加载更多内容失败:', err)
+      console.error('加载更多章节失败:', err)
     } finally {
-      setLoadingMore(false)
+      setLoadingChapter(false)
     }
   }
 
@@ -511,52 +542,11 @@ export default function ReaderPage() {
     }
   }
 
-  // TXT 内容加载后恢复进度
-  useEffect(() => {
-    if (contentLoaded && savedProgress !== null && !isEpub && contentRef.current && totalLength > 0) {
-      // 基于全书百分比计算目标偏移
-      const targetOffset = Math.floor(totalLength * savedProgress)
-      setCurrentOffset(targetOffset)
-      setProgress(savedProgress)
-      
-      // 找到对应的章节并跳转
-      const chapterIndex = chapters.findIndex(ch => 
-        targetOffset >= ch.startOffset && targetOffset < ch.endOffset
-      )
-      
-      if (chapterIndex >= 0) {
-        setCurrentChapter(chapterIndex)
-        
-        // 如果目标位置在已加载内容之外，需要加载对应页
-        if (targetOffset > loadedEndOffset) {
-          const targetPage = Math.floor(targetOffset / 50000)  // CHARS_PER_PAGE
-          loadTxtContent(targetPage)
-        }
-      }
-      
-      console.log(`已恢复阅读进度: ${Math.round(savedProgress * 100)}%`)
-    }
-  }, [contentLoaded, savedProgress, isEpub, totalLength, chapters])
-
-  // EPUB 渲染完成后恢复进度
-  useEffect(() => {
-    if (epubRendition && savedProgress !== null && epubBook) {
-      epubBook.locations.generate(1024).then(() => {
-        const cfi = epubBook.locations.cfiFromPercentage(savedProgress)
-        if (cfi) {
-          epubRendition.display(cfi)
-          setProgress(savedProgress)
-          console.log(`已恢复 EPUB 阅读进度: ${Math.round(savedProgress * 100)}%`)
-        }
-      })
-    }
-  }, [epubRendition, savedProgress, epubBook])
-
   const saveProgress = async () => {
     try {
       await api.post(`/api/progress/${id}`, {
         progress: progress,
-        position: String(currentOffset),
+        position: `${currentChapter}:0`,  // 章节号:章节内偏移
         finished: progress >= 0.98,
       })
     } catch (err) {
@@ -564,72 +554,59 @@ export default function ReaderPage() {
     }
   }
 
-  // 基于滚动位置计算当前阅读的字符偏移
+  // 监听滚动，更新当前章节并预加载
   const handleScroll = useCallback(() => {
-    if (contentRef.current && !isEpub && totalLength > 0) {
-      const { scrollTop, scrollHeight, clientHeight } = contentRef.current
-      
-      // 计算滚动比例
-      const scrollRatio = scrollHeight > clientHeight 
-        ? scrollTop / (scrollHeight - clientHeight)
-        : 0
-      
-      // 计算当前加载内容中的位置对应的全书偏移
-      // 当前偏移 = 已加载内容开始位置 + (滚动比例 * 已加载内容长度)
-      const loadedStartOffset = currentPage * 50000  // CHARS_PER_PAGE
-      const loadedLength = loadedEndOffset - loadedStartOffset
-      const positionInLoaded = scrollRatio * loadedLength
-      const globalOffset = Math.floor(loadedStartOffset + positionInLoaded)
-      
-      setCurrentOffset(globalOffset)
-      
-      // 基于全书长度计算进度百分比
-      const newProgress = totalLength > 0 ? globalOffset / totalLength : 0
-      setProgress(Math.min(Math.max(newProgress, 0), 1))
-
-      // 更新当前章节
-      const chapterIndex = chapters.findIndex(ch => 
-        globalOffset >= ch.startOffset && globalOffset < ch.endOffset
-      )
-      if (chapterIndex >= 0 && chapterIndex !== currentChapter) {
-        setCurrentChapter(chapterIndex)
-      }
-      
-      // 滚动到底部时自动加载更多
-      if (hasMore && !loadingMore && scrollTop + clientHeight >= scrollHeight - 500) {
-        loadMoreContent()
+    if (!contentRef.current || isEpub || loadedChapters.length === 0) return
+    
+    const container = contentRef.current
+    const containerRect = container.getBoundingClientRect()
+    const containerTop = containerRect.top
+    
+    // 找到当前可见的章节
+    let visibleChapterIndex = currentChapter
+    for (const [index, element] of chapterRefs.current.entries()) {
+      const rect = element.getBoundingClientRect()
+      // 章节顶部进入视口中间位置时认为是当前章节
+      if (rect.top <= containerTop + containerRect.height / 3) {
+        visibleChapterIndex = index
       }
     }
-  }, [chapters, isEpub, hasMore, loadingMore, totalLength, currentPage, loadedEndOffset, currentChapter])
+    
+    if (visibleChapterIndex !== currentChapter) {
+      setCurrentChapter(visibleChapterIndex)
+      
+      // 更新进度
+      const chapter = loadedChapters.find(ch => ch.index === visibleChapterIndex)
+      if (chapter && totalLength > 0) {
+        setProgress(chapter.startOffset / totalLength)
+      }
+    }
+    
+    // 接近边界时预加载更多章节
+    const scrollTop = container.scrollTop
+    const scrollHeight = container.scrollHeight
+    const clientHeight = container.clientHeight
+    
+    // 接近顶部，加载前面的章节
+    if (scrollTop < 500 && loadedRange.start > 0) {
+      loadMoreChapters('prev')
+    }
+    
+    // 接近底部，加载后面的章节
+    if (scrollTop + clientHeight > scrollHeight - 500 && loadedRange.end < totalChapters - 1) {
+      loadMoreChapters('next')
+    }
+  }, [currentChapter, isEpub, loadedChapters, loadedRange, totalChapters, totalLength])
 
   const goToChapter = (index: number) => {
-    setCurrentChapter(index)
     setTocOpen(false)
     
-    const chapter = chapters[index]
-    if (!chapter) return
-    
-    // 更新当前偏移和进度
-    setCurrentOffset(chapter.startOffset)
-    setProgress(totalLength > 0 ? chapter.startOffset / totalLength : 0)
-    
-    // 如果章节在已加载内容范围内，直接滚动
-    const loadedStartOffset = currentPage * 50000
-    if (chapter.startOffset >= loadedStartOffset && chapter.startOffset < loadedEndOffset) {
-      // 在已加载内容中找到章节位置
-      const chapterElement = document.getElementById(`chapter-${index}`)
-      if (chapterElement) {
-        chapterElement.scrollIntoView({ behavior: 'smooth' })
-        return
-      }
-    }
-    
-    // 需要加载对应页
-    const targetPage = Math.floor(chapter.startOffset / 50000)
-    if (targetPage !== currentPage) {
-      // 重新加载从目标页开始的内容
-      setContent('')
-      loadTxtContent(targetPage)
+    // 如果章节在已加载范围内，直接滚动
+    if (index >= loadedRange.start && index <= loadedRange.end) {
+      scrollToChapter(index)
+    } else {
+      // 需要重新加载
+      loadChapterContent(index)
     }
   }
 
@@ -644,62 +621,55 @@ export default function ReaderPage() {
   const epubNext = () => epubRendition?.next()
 
   const prevChapter = () => {
-    if (currentChapter > 0) goToChapter(currentChapter - 1)
+    if (currentChapter > 0) {
+      goToChapter(currentChapter - 1)
+    }
   }
+  
   const nextChapter = () => {
-    if (currentChapter < chapters.length - 1) goToChapter(currentChapter + 1)
+    if (currentChapter < totalChapters - 1) {
+      goToChapter(currentChapter + 1)
+    }
   }
 
-  // 根据已加载内容和章节信息渲染内容
-  const renderContent = () => {
-    if (!content) return null
+  // 渲染已加载的章节
+  const renderChapters = () => {
+    if (loadedChapters.length === 0) return null
     
-    const loadedStartOffset = currentPage * 50000
-    
-    // 找到当前已加载内容覆盖的章节
-    const visibleChapters = chapters.filter(ch => {
-      return ch.endOffset > loadedStartOffset && ch.startOffset < loadedEndOffset
-    })
-    
-    if (visibleChapters.length === 0) {
-      // 没有匹配章节，直接显示内容
-      return (
-        <Box sx={{ mb: 4 }}>
-          {content}
-        </Box>
-      )
-    }
-    
-    return visibleChapters.map((chapter, idx) => {
-      // 计算该章节在已加载内容中的范围
-      const chapterStartInContent = Math.max(0, chapter.startOffset - loadedStartOffset)
-      const chapterEndInContent = Math.min(content.length, chapter.endOffset - loadedStartOffset)
-      
-      if (chapterStartInContent >= content.length || chapterEndInContent <= 0) {
-        return null
-      }
-      
-      const chapterContent = content.slice(chapterStartInContent, chapterEndInContent)
-      const chapterIndex = chapters.indexOf(chapter)
-      
-      return (
-        <Box key={chapter.startOffset} id={`chapter-${chapterIndex}`} sx={{ mb: 4 }}>
-          <Typography
-            variant="h5"
-            sx={{
-              fontWeight: 'bold',
-              mb: 2,
-              mt: idx > 0 ? 4 : 0,
-              color: themes[theme].text,
-              fontFamily: fontFamily,
-            }}
-          >
-            {chapter.title}
-          </Typography>
-          {chapterContent.replace(chapter.title, '').trim()}
-        </Box>
-      )
-    })
+    return loadedChapters.map((chapter) => (
+      <Box
+        key={chapter.index}
+        ref={(el: HTMLDivElement | null) => {
+          if (el) {
+            chapterRefs.current.set(chapter.index, el)
+          }
+        }}
+        id={`chapter-${chapter.index}`}
+        sx={{ mb: 4 }}
+      >
+        <Typography
+          variant="h5"
+          sx={{
+            fontWeight: 'bold',
+            mb: 2,
+            mt: chapter.index > loadedRange.start ? 4 : 0,
+            color: themes[theme].text,
+            fontFamily: fontFamily,
+          }}
+        >
+          {chapter.title}
+        </Typography>
+        <Typography
+          component="div"
+          sx={{
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+          }}
+        >
+          {chapter.content}
+        </Typography>
+      </Box>
+    ))
   }
 
   const currentTheme = themes[theme]
@@ -740,7 +710,7 @@ export default function ReaderPage() {
         <Toolbar>
           <IconButton edge="start" color="inherit" onClick={(e) => {
             e.stopPropagation()
-            if (progress > 0 && id) {
+            if (currentChapter >= 0 && id && !isEpub) {
               saveProgress()
             }
             navigate(-1)
@@ -804,6 +774,13 @@ export default function ReaderPage() {
             transition: 'padding 0.3s ease',
           }}
         >
+          {/* 加载前面章节指示 */}
+          {loadingChapter && loadedRange.start > 0 && (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
+              <CircularProgress size={24} />
+            </Box>
+          )}
+          
           <Typography
             component="div"
             sx={{
@@ -811,20 +788,20 @@ export default function ReaderPage() {
               lineHeight: lineHeight,
               fontFamily: fontFamily,
               letterSpacing: `${letterSpacing}px`,
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
               '& p, & div': {
                 marginBottom: `${paragraphSpacing}em`,
               }
             }}
           >
-            {renderContent()}
-            {loadingMore && (
-              <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
-                <CircularProgress size={24} />
-              </Box>
-            )}
+            {renderChapters()}
           </Typography>
+          
+          {/* 加载后面章节指示 */}
+          {loadingChapter && (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
+              <CircularProgress size={24} />
+            </Box>
+          )}
         </Box>
       )}
 
@@ -854,25 +831,17 @@ export default function ReaderPage() {
         >
           <ChevronLeft />
         </IconButton>
-        <Typography variant="caption" sx={{ minWidth: 60, fontSize: 11 }}>
-          {isEpub ? 'EPUB' : `第${currentChapter + 1}章`}
+        <Typography variant="caption" sx={{ minWidth: 80, fontSize: 11 }}>
+          {isEpub ? 'EPUB' : `${currentChapter + 1}/${totalChapters}章`}
         </Typography>
         <Slider
           value={progress * 100}
           onChange={(_, value) => {
+            if (isEpub) return
             // 拖动进度条跳转
             const newProgress = (value as number) / 100
-            const targetOffset = Math.floor(totalLength * newProgress)
-            setProgress(newProgress)
-            setCurrentOffset(targetOffset)
-            
-            // 找到对应章节
-            const chapterIndex = chapters.findIndex(ch => 
-              targetOffset >= ch.startOffset && targetOffset < ch.endOffset
-            )
-            if (chapterIndex >= 0) {
-              goToChapter(chapterIndex)
-            }
+            const targetChapter = Math.floor(newProgress * totalChapters)
+            goToChapter(Math.min(targetChapter, totalChapters - 1))
           }}
           onClick={(e) => e.stopPropagation()}
           sx={{ flex: 1 }}
@@ -885,7 +854,7 @@ export default function ReaderPage() {
         <IconButton
           size="small"
           onClick={(e) => { e.stopPropagation(); isEpub ? epubNext() : nextChapter() }}
-          disabled={!isEpub && currentChapter >= chapters.length - 1}
+          disabled={!isEpub && currentChapter >= totalChapters - 1}
           sx={{ color: 'white' }}
         >
           <ChevronRight />
@@ -896,7 +865,7 @@ export default function ReaderPage() {
       <Drawer anchor="left" open={tocOpen} onClose={() => setTocOpen(false)} onClick={(e) => e.stopPropagation()}>
         <Box sx={{ width: 300, p: 2 }}>
           <Typography variant="h6" sx={{ mb: 2 }}>
-            目录 ({chapters.length}章)
+            目录 ({totalChapters}章)
           </Typography>
           <List sx={{ maxHeight: 'calc(100vh - 100px)', overflow: 'auto' }}>
             {isEpub ? (
@@ -1069,7 +1038,7 @@ export default function ReaderPage() {
               ⏱️ 本次阅读：{formatReadingTime()}
             </Typography>
             <Typography variant="body2">
-              📚 章节：{currentChapter + 1} / {chapters.length}
+              📚 章节：{currentChapter + 1} / {totalChapters}
             </Typography>
             {totalLength > 0 && (
               <Typography variant="body2">

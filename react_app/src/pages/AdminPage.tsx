@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Box, Tabs, Tab, Typography, Container } from '@mui/material'
-import { People, LibraryBooks, Backup, Image, TextFields, LocalOffer, Psychology, Code } from '@mui/icons-material'
+import { People, LibraryBooks, Backup, Image, TextFields, LocalOffer, Psychology, Code, Settings } from '@mui/icons-material'
+import SettingsTab from '../components/admin/SettingsTab'
 import UsersTab from '../components/admin/UsersTab'
 import LibrariesTab from '../components/admin/LibrariesTab'
 import BackupTab from '../components/admin/BackupTab'
@@ -41,6 +42,7 @@ export default function AdminPage() {
           variant="scrollable"
           scrollButtons="auto"
         >
+          <Tab icon={<Settings />} label="系统设置" iconPosition="start" />
           <Tab icon={<People />} label="用户管理" iconPosition="start" />
           <Tab icon={<LibraryBooks />} label="书库管理" iconPosition="start" />
           <Tab icon={<LocalOffer />} label="标签管理" iconPosition="start" />
@@ -53,27 +55,30 @@ export default function AdminPage() {
       </Box>
 
       <TabPanel value={tabValue} index={0}>
-        <UsersTab />
+        <SettingsTab />
       </TabPanel>
       <TabPanel value={tabValue} index={1}>
-        <LibrariesTab />
+        <UsersTab />
       </TabPanel>
       <TabPanel value={tabValue} index={2}>
-        <TagsTab />
+        <LibrariesTab />
       </TabPanel>
       <TabPanel value={tabValue} index={3}>
-        <PatternsTab />
+        <TagsTab />
       </TabPanel>
       <TabPanel value={tabValue} index={4}>
-        <AITab />
+        <PatternsTab />
       </TabPanel>
       <TabPanel value={tabValue} index={5}>
-        <BackupTab />
+        <AITab />
       </TabPanel>
       <TabPanel value={tabValue} index={6}>
-        <CoversTab />
+        <BackupTab />
       </TabPanel>
       <TabPanel value={tabValue} index={7}>
+        <CoversTab />
+      </TabPanel>
+      <TabPanel value={tabValue} index={8}>
         <FontsTab />
       </TabPanel>
     </Container>

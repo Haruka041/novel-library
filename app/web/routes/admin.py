@@ -731,6 +731,126 @@ async def toggle_library_public(
     }
 
 
+class LibraryContentRatingUpdate(BaseModel):
+    """更新书库内容分级请求"""
+    content_rating: str  # 'general', 'teen', 'adult', 'r18'
+
+
+@router.get("/admin/libraries/{library_id}/content-rating")
+async def get_library_content_rating(
+    library_id: int,
+    current_user: User = Depends(admin_required),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    获取书库内容分级设置（管理员）
+    """
+    result = await db.execute(
+        select(Library).where(Library.id == library_id)
+    )
+    library = result.scalar_one_or_none()
+    
+    if not library:
+        raise HTTPException(status_code=404, detail="书库不存在")
+    
+    return {
+        "library_id": library_id,
+        "library_name": library.name,
+        "content_rating": library.content_rating or "general",
+    }
+
+
+@router.put("/admin/libraries/{library_id}/content-rating")
+async def update_library_content_rating(
+    library_id: int,
+    data: LibraryContentRatingUpdate,
+    current_user: User = Depends(admin_required),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    更新书库内容分级（管理员）
+    
+    可选值：
+    - general: 全年龄
+    - teen: 青少年 (13+)
+    - adult: 成人 (18+)
+    - r18: R18内容
+    
+    设置后，扫描入库的新书会自动继承此分级
+    """
+    valid_ratings = ['general', 'teen', 'adult', 'r18']
+    if data.content_rating not in valid_ratings:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"无效的内容分级，有效值: {valid_ratings}"
+        )
+    
+    result = await db.execute(
+        select(Library).where(Library.id == library_id)
+    )
+    library = result.scalar_one_or_none()
+    
+    if not library:
+        raise HTTPException(status_code=404, detail="书库不存在")
+    
+    library.content_rating = data.content_rating
+    await db.commit()
+    
+    log.info(
+        f"管理员 {current_user.username} 将书库 {library.name} "
+        f"内容分级设置为 {data.content_rating}"
+    )
+    
+    return {
+        "library_id": library_id,
+        "library_name": library.name,
+        "content_rating": data.content_rating,
+    }
+
+
+@router.post("/admin/libraries/{library_id}/apply-content-rating")
+async def apply_library_content_rating_to_books(
+    library_id: int,
+    current_user: User = Depends(admin_required),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    将书库的内容分级应用到书库内所有书籍（管理员）
+    """
+    result = await db.execute(
+        select(Library).where(Library.id == library_id)
+    )
+    library = result.scalar_one_or_none()
+    
+    if not library:
+        raise HTTPException(status_code=404, detail="书库不存在")
+    
+    content_rating = library.content_rating or "general"
+    
+    # 更新书库内所有书籍的分级
+    from sqlalchemy import update
+    result = await db.execute(
+        update(Book)
+        .where(Book.library_id == library_id)
+        .values(age_rating=content_rating)
+    )
+    
+    updated_count = result.rowcount
+    await db.commit()
+    
+    log.info(
+        f"管理员 {current_user.username} 将书库 {library.name} 的内容分级 "
+        f"({content_rating}) 应用到 {updated_count} 本书"
+    )
+    
+    return {
+        "library_id": library_id,
+        "library_name": library.name,
+        "content_rating": content_rating,
+        "updated_count": updated_count,
+    }
+
+
 @router.post("/admin/analyze-library/{library_id}", response_model=AnalysisResult)
 async def analyze_library_filenames(
     library_id: int,
