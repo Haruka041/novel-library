@@ -412,14 +412,35 @@ async def list_books(
         try:
             tag_id_list = [int(t.strip()) for t in tag_ids.split(',') if t.strip()]
             if tag_id_list:
-                # 子查询：找到同时拥有所有选中标签的书籍ID
-                # 使用 group by + having count 确保必须包含所有标签
-                subquery = select(BookTag.book_id).where(
-                    BookTag.tag_id.in_(tag_id_list)
-                ).group_by(BookTag.book_id).having(
-                    func.count(BookTag.tag_id) >= len(tag_id_list)
-                )
-                query = query.where(Book.id.in_(subquery))
+                # 先查询符合条件的书籍ID列表
+                if len(tag_id_list) == 1:
+                    # 单个标签：简单的IN查询
+                    tag_subquery = select(BookTag.book_id).where(
+                        BookTag.tag_id == tag_id_list[0]
+                    ).distinct()
+                else:
+                    # 多个标签：使用 group by + having count 确保必须包含所有标签
+                    tag_subquery = select(BookTag.book_id).where(
+                        BookTag.tag_id.in_(tag_id_list)
+                    ).group_by(BookTag.book_id).having(
+                        func.count(BookTag.tag_id) >= len(tag_id_list)
+                    )
+                
+                # 先执行子查询获取书籍ID列表
+                tag_book_result = await db.execute(tag_subquery)
+                tag_book_ids = [row[0] for row in tag_book_result]
+                
+                if tag_book_ids:
+                    query = query.where(Book.id.in_(tag_book_ids))
+                else:
+                    # 没有匹配的书籍，直接返回空结果
+                    return {
+                        "books": [],
+                        "total": 0,
+                        "page": page,
+                        "limit": limit,
+                        "total_pages": 0
+                    }
         except ValueError:
             pass  # 忽略无效的标签ID
     
@@ -788,14 +809,42 @@ async def update_book_tags(
 
 @router.get("/authors", response_model=List[AuthorResponse])
 async def list_authors(
+    min_books: int = Query(1, ge=0, description="最少书籍数量过滤"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取作者列表"""
+    """
+    获取作者列表
+    只返回用户可访问书库中有书籍的作者，并按书籍数量排序
+    """
+    # 获取用户可访问的书库ID列表
+    accessible_library_ids = await get_accessible_library_ids(current_user, db)
+    
+    if not accessible_library_ids:
+        return []
+    
+    # 查询有书的作者，并统计书籍数量
     result = await db.execute(
-        select(Author).order_by(Author.name)
+        select(
+            Author.id,
+            Author.name,
+            func.count(Book.id).label('book_count')
+        )
+        .join(Book, Book.author_id == Author.id)
+        .where(Book.library_id.in_(accessible_library_ids))
+        .group_by(Author.id, Author.name)
+        .having(func.count(Book.id) >= min_books)
+        .order_by(func.count(Book.id).desc(), Author.name)
     )
-    authors = result.scalars().all()
+    
+    authors = []
+    for row in result:
+        authors.append({
+            "id": row.id,
+            "name": row.name,
+            "book_count": row.book_count
+        })
+    
     return authors
 
 
