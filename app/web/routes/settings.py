@@ -12,11 +12,13 @@ from app.models import User
 from app.web.routes.admin import admin_required
 from app.web.routes.auth import get_current_user
 from app.utils.logger import log
+from app.config import settings as app_settings
 
 router = APIRouter()
 
 # 设置文件路径
 SETTINGS_FILE = Path("config/system_settings.json")
+TELEGRAM_SETTINGS_FILE = Path("config/telegram_settings.json")
 
 # 默认设置
 DEFAULT_SETTINGS = {
@@ -26,6 +28,14 @@ DEFAULT_SETTINGS = {
     "registration_enabled": False,
     "default_theme": "system",
     "default_cover_size": "medium",
+}
+
+# Telegram 默认设置
+DEFAULT_TELEGRAM_SETTINGS = {
+    "enabled": False,
+    "bot_token": "",
+    "webhook_url": "",
+    "max_file_size": 20,  # MB
 }
 
 
@@ -62,6 +72,38 @@ class SettingsUpdate(BaseModel):
     registration_enabled: Optional[bool] = None
     default_theme: Optional[str] = None
     default_cover_size: Optional[str] = None
+
+
+class TelegramSettingsUpdate(BaseModel):
+    """Telegram 设置更新请求"""
+    enabled: Optional[bool] = None
+    bot_token: Optional[str] = None
+    webhook_url: Optional[str] = None
+    max_file_size: Optional[int] = None
+
+
+def load_telegram_settings() -> dict:
+    """加载 Telegram 设置"""
+    if TELEGRAM_SETTINGS_FILE.exists():
+        try:
+            with open(TELEGRAM_SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                saved = json.load(f)
+                return {**DEFAULT_TELEGRAM_SETTINGS, **saved}
+        except Exception as e:
+            log.error(f"加载 Telegram 设置失败: {e}")
+    return DEFAULT_TELEGRAM_SETTINGS.copy()
+
+
+def save_telegram_settings(settings: dict) -> bool:
+    """保存 Telegram 设置"""
+    try:
+        TELEGRAM_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(TELEGRAM_SETTINGS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(settings, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        log.error(f"保存 Telegram 设置失败: {e}")
+        return False
 
 
 @router.get("/settings/public")
@@ -139,3 +181,99 @@ async def update_settings(
         "message": f"已更新 {update_count} 项设置",
         "settings": settings
     }
+
+
+# ===== Telegram 设置 API =====
+
+@router.get("/admin/telegram")
+async def get_telegram_settings(
+    admin: User = Depends(admin_required)
+):
+    """
+    获取 Telegram Bot 设置（管理员）
+    """
+    settings = load_telegram_settings()
+    # 不返回完整的 bot_token，只返回是否已配置
+    return {
+        "enabled": settings.get("enabled", False),
+        "bot_token_configured": bool(settings.get("bot_token", "")),
+        "bot_token_preview": settings.get("bot_token", "")[:10] + "..." if settings.get("bot_token") else "",
+        "webhook_url": settings.get("webhook_url", ""),
+        "max_file_size": settings.get("max_file_size", 20),
+    }
+
+
+@router.put("/admin/telegram")
+async def update_telegram_settings(
+    data: TelegramSettingsUpdate,
+    admin: User = Depends(admin_required)
+):
+    """
+    更新 Telegram Bot 设置（管理员）
+    """
+    settings = load_telegram_settings()
+    
+    # 更新非空字段
+    update_count = 0
+    for key, value in data.dict().items():
+        if value is not None:
+            settings[key] = value
+            update_count += 1
+    
+    if update_count == 0:
+        raise HTTPException(status_code=400, detail="没有要更新的设置")
+    
+    if not save_telegram_settings(settings):
+        raise HTTPException(status_code=500, detail="保存设置失败")
+    
+    log.info(f"管理员 {admin.username} 更新了 Telegram 设置")
+    
+    return {
+        "message": "Telegram 设置已更新",
+        "enabled": settings.get("enabled", False),
+        "bot_token_configured": bool(settings.get("bot_token", "")),
+    }
+
+
+@router.post("/admin/telegram/test")
+async def test_telegram_connection(
+    admin: User = Depends(admin_required)
+):
+    """
+    测试 Telegram Bot 连接
+    """
+    settings = load_telegram_settings()
+    bot_token = settings.get("bot_token", "")
+    
+    if not bot_token:
+        raise HTTPException(status_code=400, detail="未配置 Bot Token")
+    
+    try:
+        import httpx
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"https://api.telegram.org/bot{bot_token}/getMe",
+                timeout=10.0
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("ok"):
+                    bot_info = data.get("result", {})
+                    return {
+                        "success": True,
+                        "bot_username": bot_info.get("username"),
+                        "bot_name": bot_info.get("first_name"),
+                    }
+            
+            return {
+                "success": False,
+                "error": "无效的 Bot Token"
+            }
+    except Exception as e:
+        log.error(f"测试 Telegram 连接失败: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }

@@ -11,8 +11,11 @@ import {
   Alert,
   Divider,
   CircularProgress,
+  Chip,
+  InputAdornment,
+  IconButton,
 } from '@mui/material'
-import { Save } from '@mui/icons-material'
+import { Save, Telegram, Visibility, VisibilityOff, CheckCircle, Error } from '@mui/icons-material'
 import api from '../../services/api'
 import { useSettingsStore } from '../../stores/settingsStore'
 
@@ -21,6 +24,14 @@ interface SystemSettings {
   server_description: string
   welcome_message: string
   registration_enabled: boolean
+}
+
+interface TelegramSettings {
+  enabled: boolean
+  bot_token_configured: boolean
+  bot_token_preview: string
+  webhook_url: string
+  max_file_size: number
 }
 
 export default function SettingsTab() {
@@ -35,11 +46,29 @@ export default function SettingsTab() {
   const [success, setSuccess] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Telegram 设置
+  const [telegramSettings, setTelegramSettings] = useState<TelegramSettings>({
+    enabled: false,
+    bot_token_configured: false,
+    bot_token_preview: '',
+    webhook_url: '',
+    max_file_size: 20,
+  })
+  const [botToken, setBotToken] = useState('')
+  const [showToken, setShowToken] = useState(false)
+  const [telegramLoading, setTelegramLoading] = useState(true)
+  const [telegramSaving, setTelegramSaving] = useState(false)
+  const [telegramSuccess, setTelegramSuccess] = useState(false)
+  const [telegramError, setTelegramError] = useState<string | null>(null)
+  const [testingConnection, setTestingConnection] = useState(false)
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
+
   // 获取 settingsStore 用于刷新
   const settingsStore = useSettingsStore()
 
   useEffect(() => {
     loadSettings()
+    loadTelegramSettings()
   }, [])
 
   const loadSettings = async () => {
@@ -52,6 +81,77 @@ export default function SettingsTab() {
       setError('加载设置失败')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const loadTelegramSettings = async () => {
+    try {
+      setTelegramLoading(true)
+      const response = await api.get<TelegramSettings>('/api/admin/telegram')
+      setTelegramSettings(response.data)
+    } catch (err: unknown) {
+      console.error('加载 Telegram 设置失败:', err)
+    } finally {
+      setTelegramLoading(false)
+    }
+  }
+
+  const handleSaveTelegram = async () => {
+    try {
+      setTelegramSaving(true)
+      setTelegramError(null)
+      setTelegramSuccess(false)
+      
+      const updateData: Record<string, unknown> = {
+        enabled: telegramSettings.enabled,
+        webhook_url: telegramSettings.webhook_url,
+        max_file_size: telegramSettings.max_file_size,
+      }
+      
+      // 只有输入了新token才更新
+      if (botToken.trim()) {
+        updateData.bot_token = botToken.trim()
+      }
+      
+      await api.put('/api/admin/telegram', updateData)
+      setTelegramSuccess(true)
+      setBotToken('')
+      loadTelegramSettings()
+      
+      setTimeout(() => setTelegramSuccess(false), 3000)
+    } catch (err: unknown) {
+      console.error('保存 Telegram 设置失败:', err)
+      setTelegramError('保存 Telegram 设置失败')
+    } finally {
+      setTelegramSaving(false)
+    }
+  }
+
+  const handleTestConnection = async () => {
+    try {
+      setTestingConnection(true)
+      setTestResult(null)
+      
+      const response = await api.post<{ success: boolean; bot_username?: string; bot_name?: string; error?: string }>('/api/admin/telegram/test')
+      
+      if (response.data.success) {
+        setTestResult({
+          success: true,
+          message: `连接成功！Bot: @${response.data.bot_username} (${response.data.bot_name})`
+        })
+      } else {
+        setTestResult({
+          success: false,
+          message: response.data.error || '连接失败'
+        })
+      }
+    } catch (err: unknown) {
+      setTestResult({
+        success: false,
+        message: '测试连接失败'
+      })
+    } finally {
+      setTestingConnection(false)
     }
   }
 
@@ -161,7 +261,7 @@ export default function SettingsTab() {
 
       <Divider sx={{ my: 3 }} />
 
-      <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 4 }}>
         <Button
           variant="contained"
           startIcon={saving ? <CircularProgress size={20} color="inherit" /> : <Save />}
@@ -171,6 +271,177 @@ export default function SettingsTab() {
           {saving ? '保存中...' : '保存设置'}
         </Button>
       </Box>
+
+      {/* Telegram Bot 设置 */}
+      <Typography variant="h5" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 4 }}>
+        <Telegram color="primary" />
+        Telegram Bot 设置
+      </Typography>
+
+      {telegramSuccess && (
+        <Alert severity="success" sx={{ mb: 2 }}>
+          Telegram 设置保存成功！
+        </Alert>
+      )}
+      
+      {telegramError && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {telegramError}
+        </Alert>
+      )}
+
+      {telegramLoading ? (
+        <Box display="flex" justifyContent="center" py={4}>
+          <CircularProgress />
+        </Box>
+      ) : (
+        <>
+          <Card sx={{ mb: 3 }}>
+            <CardContent>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+                <Typography variant="h6">
+                  Bot 配置
+                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  {telegramSettings.bot_token_configured ? (
+                    <Chip 
+                      icon={<CheckCircle />} 
+                      label="已配置" 
+                      color="success" 
+                      size="small" 
+                    />
+                  ) : (
+                    <Chip 
+                      icon={<Error />} 
+                      label="未配置" 
+                      color="warning" 
+                      size="small" 
+                    />
+                  )}
+                </Box>
+              </Box>
+              
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                配置 Telegram Bot 以启用消息推送和文件下载功能。从 @BotFather 获取 Bot Token。
+              </Typography>
+
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={telegramSettings.enabled}
+                      onChange={(e) => setTelegramSettings({ ...telegramSettings, enabled: e.target.checked })}
+                    />
+                  }
+                  label="启用 Telegram Bot"
+                />
+
+                {telegramSettings.bot_token_configured && telegramSettings.bot_token_preview && (
+                  <Alert severity="info" sx={{ py: 0.5 }}>
+                    当前 Token: {telegramSettings.bot_token_preview}
+                  </Alert>
+                )}
+
+                <TextField
+                  label="Bot Token"
+                  value={botToken}
+                  onChange={(e) => setBotToken(e.target.value)}
+                  placeholder={telegramSettings.bot_token_configured ? '输入新 Token 以更新' : '例如: 123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ'}
+                  type={showToken ? 'text' : 'password'}
+                  fullWidth
+                  InputProps={{
+                    endAdornment: (
+                      <InputAdornment position="end">
+                        <IconButton onClick={() => setShowToken(!showToken)} edge="end">
+                          {showToken ? <VisibilityOff /> : <Visibility />}
+                        </IconButton>
+                      </InputAdornment>
+                    ),
+                  }}
+                  helperText="从 Telegram @BotFather 获取"
+                />
+
+                <TextField
+                  label="Webhook URL（可选）"
+                  value={telegramSettings.webhook_url}
+                  onChange={(e) => setTelegramSettings({ ...telegramSettings, webhook_url: e.target.value })}
+                  placeholder="https://your-domain.com/webhook/telegram"
+                  fullWidth
+                  helperText="留空则使用轮询模式"
+                />
+
+                <TextField
+                  label="最大文件大小 (MB)"
+                  type="number"
+                  value={telegramSettings.max_file_size}
+                  onChange={(e) => setTelegramSettings({ ...telegramSettings, max_file_size: parseInt(e.target.value) || 20 })}
+                  fullWidth
+                  helperText="Telegram 限制最大 20MB"
+                  inputProps={{ min: 1, max: 50 }}
+                />
+              </Box>
+
+              {testResult && (
+                <Alert 
+                  severity={testResult.success ? 'success' : 'error'} 
+                  sx={{ mt: 2 }}
+                >
+                  {testResult.message}
+                </Alert>
+              )}
+
+              <Box sx={{ display: 'flex', gap: 2, mt: 3 }}>
+                <Button
+                  variant="outlined"
+                  onClick={handleTestConnection}
+                  disabled={testingConnection || !telegramSettings.bot_token_configured}
+                  startIcon={testingConnection ? <CircularProgress size={20} /> : <Telegram />}
+                >
+                  {testingConnection ? '测试中...' : '测试连接'}
+                </Button>
+                <Button
+                  variant="contained"
+                  onClick={handleSaveTelegram}
+                  disabled={telegramSaving}
+                  startIcon={telegramSaving ? <CircularProgress size={20} color="inherit" /> : <Save />}
+                >
+                  {telegramSaving ? '保存中...' : '保存 Telegram 设置'}
+                </Button>
+              </Box>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                使用说明
+              </Typography>
+              <Typography variant="body2" color="text.secondary" component="div">
+                <ol style={{ paddingLeft: '1.2rem', margin: 0 }}>
+                  <li>在 Telegram 中搜索 @BotFather</li>
+                  <li>发送 /newbot 创建新 Bot</li>
+                  <li>按提示设置 Bot 名称和用户名</li>
+                  <li>获取 Bot Token 并粘贴到上方</li>
+                  <li>用户在个人中心获取绑定码</li>
+                  <li>在 Telegram 发送 /bind 绑定码 完成绑定</li>
+                </ol>
+              </Typography>
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" gutterBottom>
+                  支持的命令：
+                </Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                  <Chip label="/search" size="small" variant="outlined" />
+                  <Chip label="/recent" size="small" variant="outlined" />
+                  <Chip label="/library" size="small" variant="outlined" />
+                  <Chip label="/download" size="small" variant="outlined" />
+                  <Chip label="/progress" size="small" variant="outlined" />
+                </Box>
+              </Box>
+            </CardContent>
+          </Card>
+        </>
+      )}
     </Box>
   )
 }
