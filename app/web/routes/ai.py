@@ -1,4 +1,4 @@
-"""
+ """
 AI 配置 API 路由
 """
 import re
@@ -844,6 +844,7 @@ async def apply_ai_extract(
 @router.post("/libraries/{library_id}/pattern-extract")
 async def pattern_extract_library(
     library_id: int,
+    preview_limit: int = 50,
     db: AsyncSession = Depends(get_db),
     admin = Depends(admin_required)
 ):
@@ -851,6 +852,8 @@ async def pattern_extract_library(
     使用现有规则提取书库元数据（预览模式，不自动应用）
     
     按规则优先级依次匹配每本书的文件名
+    
+    - preview_limit: 预览数量限制（默认50条），避免大量数据导致前端崩溃
     """
     from sqlalchemy import or_
     from sqlalchemy.orm import selectinload
@@ -911,20 +914,22 @@ async def pattern_extract_library(
                 extracted_author = groups[p.author_group - 1] if p.author_group > 0 and p.author_group <= len(groups) else None
                 
                 if extracted_title:
-                    changes.append({
-                        "book_id": book.id,
-                        "filename": filename,
-                        "pattern_name": p.name,
-                        "current": {
-                            "title": book.title,
-                            "author": book.author.name if book.author else None
-                        },
-                        "extracted": {
-                            "title": extracted_title.strip() if extracted_title else None,
-                            "author": extracted_author.strip() if extracted_author else None
-                        }
-                    })
                     matched_count += 1
+                    # 只保留预览数量的详情
+                    if len(changes) < preview_limit:
+                        changes.append({
+                            "book_id": book.id,
+                            "filename": filename,
+                            "pattern_name": p.name,
+                            "current": {
+                                "title": book.title,
+                                "author": book.author.name if book.author else None
+                            },
+                            "extracted": {
+                                "title": extracted_title.strip() if extracted_title else None,
+                                "author": extracted_author.strip() if extracted_author else None
+                            }
+                        })
                 
                 break
     
@@ -935,7 +940,8 @@ async def pattern_extract_library(
         "total_books": len(versions),
         "matched_count": matched_count,
         "patterns_used": len(compiled_patterns),
-        "changes": changes
+        "changes": changes,
+        "preview_truncated": matched_count > preview_limit
     }
 
 
@@ -946,7 +952,7 @@ async def apply_pattern_extract(
     db: AsyncSession = Depends(get_db),
     admin = Depends(admin_required)
 ):
-    """应用规则提取的结果"""
+    """应用规则提取的结果（仅预览的数据）"""
     applied_count = 0
     
     for change in changes:
@@ -980,6 +986,138 @@ async def apply_pattern_extract(
     return {
         "success": True,
         "applied_count": applied_count
+    }
+
+
+@router.post("/libraries/{library_id}/pattern-extract/apply-all")
+async def apply_all_pattern_extract(
+    library_id: int,
+    batch_size: int = 100,
+    db: AsyncSession = Depends(get_db),
+    admin = Depends(admin_required)
+):
+    """
+    批量应用规则到所有匹配的书籍（后台处理）
+    
+    不需要预览，直接扫描并应用。分批提交以避免超时。
+    
+    - batch_size: 每批处理数量（默认100），每批提交一次事务
+    """
+    from sqlalchemy import or_
+    from sqlalchemy.orm import selectinload
+    from app.utils.logger import log
+    
+    lib_result = await db.execute(select(Library).where(Library.id == library_id))
+    library = lib_result.scalar_one_or_none()
+    if not library:
+        raise HTTPException(404, "书库不存在")
+    
+    # 获取规则
+    patterns_result = await db.execute(
+        select(FilenamePattern).where(
+            FilenamePattern.is_active == True,
+            or_(FilenamePattern.library_id == library_id, FilenamePattern.library_id == None)
+        ).order_by(FilenamePattern.priority.desc())
+    )
+    patterns = patterns_result.scalars().all()
+    
+    if not patterns:
+        return {"success": False, "error": "没有可用规则，请先在'文件名规则'中添加规则"}
+    
+    # 编译正则
+    compiled_patterns = []
+    for p in patterns:
+        try:
+            compiled_patterns.append({
+                "pattern": p,
+                "compiled": re.compile(p.regex_pattern)
+            })
+        except:
+            pass
+    
+    # 获取所有书籍版本
+    versions_result = await db.execute(
+        select(BookVersion).options(
+            selectinload(BookVersion.book).selectinload(Book.author)
+        ).join(Book).where(Book.library_id == library_id)
+    )
+    versions = versions_result.scalars().all()
+    
+    if not versions:
+        return {"success": False, "error": "书库中没有书籍"}
+    
+    log.info(f"开始批量应用规则到书库 {library.name}，共 {len(versions)} 本书")
+    
+    matched_count = 0
+    applied_count = 0
+    author_cache = {}  # 作者缓存
+    batch_count = 0
+    
+    for version in versions:
+        filename = version.file_name
+        book = version.book
+        
+        for cp in compiled_patterns:
+            match = cp["compiled"].match(filename)
+            if match:
+                groups = match.groups()
+                p = cp["pattern"]
+                
+                extracted_title = groups[p.title_group - 1] if p.title_group > 0 and p.title_group <= len(groups) else None
+                extracted_author = groups[p.author_group - 1] if p.author_group > 0 and p.author_group <= len(groups) else None
+                
+                if extracted_title:
+                    matched_count += 1
+                    
+                    # 更新书名
+                    book.title = extracted_title.strip()
+                    
+                    # 更新作者
+                    if extracted_author:
+                        author_name = extracted_author.strip()
+                        
+                        # 使用缓存
+                        if author_name in author_cache:
+                            book.author_id = author_cache[author_name]
+                        else:
+                            author_result = await db.execute(select(Author).where(Author.name == author_name))
+                            author = author_result.scalar_one_or_none()
+                            if not author:
+                                author = Author(name=author_name)
+                                db.add(author)
+                                await db.flush()
+                            author_cache[author_name] = author.id
+                            book.author_id = author.id
+                    
+                    # 更新规则统计
+                    p.match_count = (p.match_count or 0) + 1
+                    p.success_count = (p.success_count or 0) + 1
+                    
+                    applied_count += 1
+                    batch_count += 1
+                    
+                    # 分批提交
+                    if batch_count >= batch_size:
+                        await db.commit()
+                        log.debug(f"已处理 {applied_count} 本书")
+                        batch_count = 0
+                
+                break
+    
+    # 提交剩余的
+    if batch_count > 0:
+        await db.commit()
+    
+    log.info(f"批量应用完成: 匹配 {matched_count}, 应用 {applied_count}")
+    
+    return {
+        "success": True,
+        "library_id": library_id,
+        "library_name": library.name,
+        "total_books": len(versions),
+        "matched_count": matched_count,
+        "applied_count": applied_count,
+        "patterns_used": len(compiled_patterns)
     }
 
 

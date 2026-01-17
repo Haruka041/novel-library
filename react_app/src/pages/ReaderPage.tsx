@@ -83,6 +83,7 @@ export default function ReaderPage() {
   const [totalChapters, setTotalChapters] = useState(0)
   const [totalLength, setTotalLength] = useState(0)
   const [loadingChapter, setLoadingChapter] = useState(false)
+  const [pendingJump, setPendingJump] = useState<number | null>(null)  // 待跳转的章节索引
   
   // EPUB 相关
   const [epubBook, setEpubBook] = useState<Book | null>(null)
@@ -387,19 +388,37 @@ export default function ReaderPage() {
     }
   }
 
+  // 当 pendingJump 变化且 loadedChapters 加载完成后执行跳转
+  useEffect(() => {
+    if (pendingJump !== null && loadedChapters.length > 0 && !loadingChapter) {
+      // 确保目标章节在已加载范围内
+      if (pendingJump >= loadedRange.start && pendingJump <= loadedRange.end) {
+        // 等待 DOM 渲染完成后再滚动
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            scrollToChapter(pendingJump)
+            setPendingJump(null)
+          })
+        })
+      }
+    }
+  }, [pendingJump, loadedChapters, loadingChapter, loadedRange])
+
   // 加载章节内容（核心函数）
   const loadChapterContent = async (chapterIndex: number, buffer: number = 2) => {
     if (loadingChapter) return
     
-    // 检查是否已加载（注意：loadedChapters 必须有内容才能跳转）
+    // 检查是否已加载且目标章节在范围内
     if (loadedChapters.length > 0 && chapterIndex >= loadedRange.start && chapterIndex <= loadedRange.end) {
-      // 已加载，直接跳转
+      // 已加载，直接滚动（不需要重新加载）
       scrollToChapter(chapterIndex)
       return
     }
     
     try {
       setLoadingChapter(true)
+      // 清空旧的章节引用，避免引用混乱
+      chapterRefs.current.clear()
       
       const response = await api.get(`/api/books/${id}/chapter/${chapterIndex}`, {
         params: { buffer }
@@ -408,6 +427,7 @@ export default function ReaderPage() {
       const data = response.data
       
       if (data.format === 'txt') {
+        // 先更新状态
         setLoadedChapters(data.chapters)
         setLoadedRange({
           start: data.loadedRange.start,
@@ -423,10 +443,8 @@ export default function ReaderPage() {
           setProgress(chapter.startOffset / data.totalLength)
         }
         
-        // 等待渲染后滚动到目标章节
-        setTimeout(() => {
-          scrollToChapter(chapterIndex)
-        }, 100)
+        // 设置待跳转章节，让 useEffect 在渲染后执行跳转
+        setPendingJump(chapterIndex)
       }
     } catch (err) {
       console.error('加载章节内容失败:', err)

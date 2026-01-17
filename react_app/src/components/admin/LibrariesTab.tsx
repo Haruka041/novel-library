@@ -125,6 +125,20 @@ export default function LibrariesTab() {
   const [extractResult, setExtractResult] = useState<ExtractResult | null>(null)
   const [selectedChanges, setSelectedChanges] = useState<Set<number>>(new Set())
   const [applyingExtract, setApplyingExtract] = useState(false)
+  const [applyingAllPatterns, setApplyingAllPatterns] = useState<number | null>(null)
+  
+  // 提取任务状态（显示进度条）
+  interface ExtractTask {
+    libraryId: number
+    type: 'ai' | 'pattern'
+    status: 'running' | 'completed' | 'failed'
+    total: number
+    applied: number
+    completedAt?: string
+    error?: string
+  }
+  const [extractTasks, setExtractTasks] = useState<Record<number, ExtractTask>>({})
+  const [lastExtractTime, setLastExtractTime] = useState<Record<number, string>>({})
   
   // 表单数据
   const [formData, setFormData] = useState({
@@ -228,7 +242,82 @@ export default function LibrariesTab() {
     }
   }
   
-  // 应用提取结果
+  // 直接批量应用规则到所有匹配书籍（不预览）
+  const handleApplyAllPatterns = async (libraryId: number) => {
+    const library = libraries.find(l => l.id === libraryId)
+    if (!confirm(`确定要使用文件名规则批量更新书库"${library?.name || libraryId}"中所有匹配的书籍吗？\n\n这将直接更新书名和作者，无需预览。此操作不可撤销！`)) {
+      return
+    }
+    
+    // 设置任务状态为运行中
+    setExtractTasks(prev => ({
+      ...prev,
+      [libraryId]: {
+        libraryId,
+        type: 'pattern',
+        status: 'running',
+        total: 0,
+        applied: 0
+      }
+    }))
+    
+    try {
+      const response = await api.post(`/api/admin/ai/libraries/${libraryId}/pattern-extract/apply-all`)
+      
+      if (response.data.success) {
+        // 更新任务状态为完成
+        const now = new Date().toISOString()
+        setExtractTasks(prev => ({
+          ...prev,
+          [libraryId]: {
+            libraryId,
+            type: 'pattern',
+            status: 'completed',
+            total: response.data.matched_count,
+            applied: response.data.applied_count,
+            completedAt: now
+          }
+        }))
+        setLastExtractTime(prev => ({ ...prev, [libraryId]: now }))
+        loadLibraries()
+        
+        // 5秒后清除完成状态
+        setTimeout(() => {
+          setExtractTasks(prev => {
+            const newTasks = { ...prev }
+            if (newTasks[libraryId]?.status === 'completed') {
+              delete newTasks[libraryId]
+            }
+            return newTasks
+          })
+        }, 5000)
+      } else {
+        setExtractTasks(prev => ({
+          ...prev,
+          [libraryId]: {
+            ...prev[libraryId],
+            status: 'failed',
+            error: response.data.error
+          }
+        }))
+        setError(response.data.error || '批量应用失败')
+      }
+    } catch (err: any) {
+      setExtractTasks(prev => ({
+        ...prev,
+        [libraryId]: {
+          ...prev[libraryId],
+          status: 'failed',
+          error: err.response?.data?.detail || '批量应用失败'
+        }
+      }))
+      setError(err.response?.data?.detail || '批量应用失败')
+    } finally {
+      setApplyingAllPatterns(null)
+    }
+  }
+  
+  // 应用提取结果（异步执行，立即关闭对话框，显示进度条）
   const handleApplyExtract = async () => {
     if (!extractResult) return
     
@@ -238,19 +327,69 @@ export default function LibrariesTab() {
       return
     }
     
-    setApplyingExtract(true)
+    const count = changesToApply.length
+    const libraryId = extractResult.library_id
+    const type = extractType
+    
+    // 立即关闭对话框
+    setExtractDialogOpen(false)
+    
+    // 设置任务状态为运行中
+    setExtractTasks(prev => ({
+      ...prev,
+      [libraryId]: {
+        libraryId,
+        type,
+        status: 'running',
+        total: count,
+        applied: 0
+      }
+    }))
+    
+    // 后台执行应用
     try {
-      const endpoint = extractType === 'ai' 
-        ? `/api/admin/ai/libraries/${extractResult.library_id}/ai-extract/apply`
-        : `/api/admin/ai/libraries/${extractResult.library_id}/pattern-extract/apply`
+      const endpoint = type === 'ai' 
+        ? `/api/admin/ai/libraries/${libraryId}/ai-extract/apply`
+        : `/api/admin/ai/libraries/${libraryId}/pattern-extract/apply`
       
       const response = await api.post(endpoint, { changes: changesToApply })
       
-      alert(`应用成功！\n已更新 ${response.data.applied_count} 本书${response.data.tags_added ? `\n添加标签 ${response.data.tags_added} 个` : ''}`)
-      setExtractDialogOpen(false)
+      // 更新任务状态为完成
+      const now = new Date().toISOString()
+      setExtractTasks(prev => ({
+        ...prev,
+        [libraryId]: {
+          libraryId,
+          type,
+          status: 'completed',
+          total: count,
+          applied: response.data.applied_count,
+          completedAt: now
+        }
+      }))
+      setLastExtractTime(prev => ({ ...prev, [libraryId]: now }))
       loadLibraries()
+      
+      // 5秒后清除完成状态
+      setTimeout(() => {
+        setExtractTasks(prev => {
+          const newTasks = { ...prev }
+          if (newTasks[libraryId]?.status === 'completed') {
+            delete newTasks[libraryId]
+          }
+          return newTasks
+        })
+      }, 5000)
     } catch (err: any) {
-      setError(err.response?.data?.detail || '应用失败')
+      setExtractTasks(prev => ({
+        ...prev,
+        [libraryId]: {
+          ...prev[libraryId],
+          status: 'failed',
+          error: err.response?.data?.detail || `应用失败`
+        }
+      }))
+      setError(err.response?.data?.detail || `应用 ${count} 项变更失败`)
     } finally {
       setApplyingExtract(false)
     }
@@ -660,6 +799,9 @@ export default function LibrariesTab() {
           const libraryPaths = paths[library.id] || []
           const history = taskHistories[library.id] || []
           
+          const extractTask = extractTasks[library.id]
+          const lastExtract = lastExtractTime[library.id]
+          
           return (
             <Grid item xs={12} key={library.id}>
               <Card>
@@ -676,7 +818,19 @@ export default function LibrariesTab() {
                       <Box sx={{ display: 'flex', gap: 1, mt: 1.5, flexWrap: 'wrap' }}>
                         <Chip label={`${library.book_count || 0} 本书`} size="small" color="primary" variant="outlined" />
                         <Chip label={`上次扫描: ${formatDate(library.last_scan)}`} size="small" variant="outlined" />
+                        {lastExtract && (
+                          <Chip 
+                            label={`上次提取: ${formatDate(lastExtract)}`} 
+                            size="small" 
+                            variant="outlined" 
+                            color="secondary"
+                            icon={<Psychology sx={{ fontSize: 16 }} />}
+                          />
+                        )}
                         {activeTask && <Chip label="扫描中" size="small" color="primary" />}
+                        {extractTask?.status === 'running' && (
+                          <Chip label="提取中" size="small" color="secondary" />
+                        )}
                       </Box>
                     </Box>
                     
@@ -749,6 +903,43 @@ export default function LibrariesTab() {
                           取消
                         </Button>
                       </Box>
+                    </Box>
+                  )}
+
+                  {/* 元数据提取任务进度 */}
+                  {extractTask && (
+                    <Box sx={{ mt: 2 }}>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                        <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                          {extractTask.type === 'ai' ? <Psychology fontSize="small" /> : <Code fontSize="small" />}
+                          {extractTask.type === 'ai' ? 'AI提取' : '规则提取'}
+                          {extractTask.status === 'running' && '中...'}
+                          {extractTask.status === 'completed' && ' 完成'}
+                          {extractTask.status === 'failed' && ' 失败'}
+                        </Typography>
+                        {extractTask.status === 'completed' && (
+                          <Chip 
+                            icon={<CheckCircle />} 
+                            label={`已更新 ${extractTask.applied} 项`} 
+                            size="small" 
+                            color="success" 
+                          />
+                        )}
+                        {extractTask.status === 'failed' && (
+                          <Chip 
+                            icon={<ErrorIcon />} 
+                            label={extractTask.error || '失败'} 
+                            size="small" 
+                            color="error" 
+                          />
+                        )}
+                      </Box>
+                      {extractTask.status === 'running' && (
+                        <LinearProgress color="secondary" />
+                      )}
+                      {extractTask.status === 'completed' && (
+                        <LinearProgress variant="determinate" value={100} color="success" />
+                      )}
                     </Box>
                   )}
 
@@ -1215,17 +1406,36 @@ export default function LibrariesTab() {
             </>
           ) : null}
         </DialogContent>
-        <DialogActions>
+        <DialogActions sx={{ flexWrap: 'wrap', gap: 1 }}>
           <Button 
             onClick={() => setExtractDialogOpen(false)} 
-            disabled={extractLoading || applyingExtract}
+            disabled={extractLoading || applyingExtract || applyingAllPatterns !== null}
           >
             取消
           </Button>
+          
+          {/* 规则提取专用：直接应用全部按钮 */}
+          {extractType === 'pattern' && extractResult && extractResult.matched_count && extractResult.matched_count > extractResult.changes.length && (
+            <Button
+              variant="outlined"
+              color="warning"
+              onClick={() => {
+                setExtractDialogOpen(false)
+                handleApplyAllPatterns(extractResult.library_id)
+              }}
+              disabled={extractLoading || applyingExtract || applyingAllPatterns !== null}
+              startIcon={applyingAllPatterns === extractResult.library_id ? <CircularProgress size={20} /> : <Sync />}
+            >
+              {applyingAllPatterns === extractResult.library_id 
+                ? '批量应用中...' 
+                : `直接应用全部 ${extractResult.matched_count} 项`}
+            </Button>
+          )}
+          
           <Button 
             variant="contained" 
             onClick={handleApplyExtract}
-            disabled={extractLoading || applyingExtract || !extractResult || selectedChanges.size === 0}
+            disabled={extractLoading || applyingExtract || applyingAllPatterns !== null || !extractResult || selectedChanges.size === 0}
             startIcon={applyingExtract ? <CircularProgress size={20} /> : <CheckCircle />}
           >
             {applyingExtract ? '应用中...' : `应用选中的 ${selectedChanges.size} 项变更`}
