@@ -65,6 +65,7 @@ export default function AITab() {
   const [maxTokens, setMaxTokens] = useState(2000)
   const [temperature, setTemperature] = useState(0.7)
   const [timeout, setTimeout] = useState(30)
+  const [sampleSize, setSampleSize] = useState(15)
   const [enabled, setEnabled] = useState(false)
   const [hasApiKey, setHasApiKey] = useState(false)
   
@@ -101,6 +102,7 @@ export default function AITab() {
       setMaxTokens(p.max_tokens)
       setTemperature(p.temperature)
       setTimeout(p.timeout)
+      setSampleSize((p as any).sample_size || 15)
       setEnabled(p.enabled)
       
       setFeatures(response.data.features)
@@ -132,6 +134,7 @@ export default function AITab() {
         max_tokens: maxTokens,
         temperature,
         timeout,
+        sample_size: sampleSize,
         enabled,
       }
       
@@ -381,6 +384,18 @@ export default function AITab() {
                 value={timeout}
                 onChange={(e) => setTimeout(parseInt(e.target.value) || 30)}
                 inputProps={{ min: 5, max: 120 }}
+              />
+            </Grid>
+
+            <Grid item xs={12} md={4}>
+              <TextField
+                fullWidth
+                type="number"
+                label="分析采样数"
+                value={sampleSize}
+                onChange={(e) => setSampleSize(parseInt(e.target.value) || 15)}
+                inputProps={{ min: 5, max: 100 }}
+                helperText="AI分析文件名时的采样数量"
               />
             </Grid>
 

@@ -52,6 +52,100 @@ class BlockedTagsUpdate(BaseModel):
 
 # ===== 标签管理 =====
 
+@router.post("/tags/init-defaults")
+async def init_default_tags(
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(get_current_admin)
+):
+    """
+    初始化预定义系统标签（需要管理员权限）
+    
+    Args:
+        db: 数据库会话
+        admin: 当前管理员
+        
+    Returns:
+        创建结果
+    """
+    # 预定义标签
+    predefined_tags = [
+        # 年龄分级标签
+        {"name": "全年龄", "type": "age_rating", "description": "适合所有年龄段阅读"},
+        {"name": "12+", "type": "age_rating", "description": "适合12岁及以上读者"},
+        {"name": "16+", "type": "age_rating", "description": "适合16岁及以上读者"},
+        {"name": "18+", "type": "age_rating", "description": "仅限成人阅读"},
+        
+        # 题材标签
+        {"name": "科幻", "type": "genre", "description": "科幻类小说"},
+        {"name": "奇幻", "type": "genre", "description": "奇幻类小说"},
+        {"name": "推理", "type": "genre", "description": "推理、侦探类小说"},
+        {"name": "悬疑", "type": "genre", "description": "悬疑类小说"},
+        {"name": "恐怖", "type": "genre", "description": "恐怖、惊悚类小说"},
+        {"name": "言情", "type": "genre", "description": "言情、爱情类小说"},
+        {"name": "武侠", "type": "genre", "description": "武侠类小说"},
+        {"name": "仙侠", "type": "genre", "description": "仙侠、修真类小说"},
+        {"name": "玄幻", "type": "genre", "description": "玄幻类小说"},
+        {"name": "历史", "type": "genre", "description": "历史类小说"},
+        {"name": "军事", "type": "genre", "description": "军事类小说"},
+        {"name": "游戏", "type": "genre", "description": "游戏类小说"},
+        {"name": "竞技", "type": "genre", "description": "竞技类小说"},
+        {"name": "灵异", "type": "genre", "description": "灵异类小说"},
+        {"name": "同人", "type": "genre", "description": "同人作品"},
+        {"name": "轻小说", "type": "genre", "description": "轻小说"},
+        {"name": "BL", "type": "genre", "description": "耽美/BL类小说"},
+        {"name": "GL", "type": "genre", "description": "百合/GL类小说"},
+        {"name": "都市", "type": "genre", "description": "都市类小说"},
+        {"name": "校园", "type": "genre", "description": "校园类小说"},
+        
+        # 内容警告标签
+        {"name": "暴力", "type": "custom", "description": "包含暴力内容"},
+        {"name": "血腥", "type": "custom", "description": "包含血腥描写"},
+        {"name": "情色", "type": "custom", "description": "包含情色内容"},
+        {"name": "脏话", "type": "custom", "description": "包含粗俗语言"},
+        
+        # 其他常用标签
+        {"name": "完结", "type": "custom", "description": "已完结作品"},
+        {"name": "连载", "type": "custom", "description": "连载中作品"},
+        {"name": "短篇", "type": "custom", "description": "短篇小说"},
+        {"name": "长篇", "type": "custom", "description": "长篇小说"},
+        {"name": "经典", "type": "custom", "description": "经典作品"},
+        {"name": "热门", "type": "custom", "description": "热门作品"},
+    ]
+    
+    created_count = 0
+    skipped_count = 0
+    created_tags = []
+    
+    for tag_data in predefined_tags:
+        # 检查标签是否已存在
+        result = await db.execute(
+            select(Tag).where(Tag.name == tag_data["name"])
+        )
+        existing_tag = result.scalar_one_or_none()
+        
+        if existing_tag:
+            skipped_count += 1
+            continue
+        
+        # 创建新标签
+        tag = Tag(**tag_data)
+        db.add(tag)
+        created_count += 1
+        created_tags.append(tag_data["name"])
+    
+    await db.commit()
+    
+    log.info(f"管理员 {admin.username} 初始化了预定义标签，创建 {created_count} 个，跳过 {skipped_count} 个")
+    
+    return {
+        "status": "success",
+        "created_count": created_count,
+        "skipped_count": skipped_count,
+        "total_predefined": len(predefined_tags),
+        "created_tags": created_tags
+    }
+
+
 @router.post("/tags", response_model=TagResponse)
 async def create_tag(
     tag_data: TagCreate,

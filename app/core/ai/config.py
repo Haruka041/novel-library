@@ -24,6 +24,9 @@ class AIProviderConfig:
     # 功能开关
     enabled: bool = False
     
+    # 分析采样数
+    sample_size: int = 15  # AI分析文件名时的采样数量
+    
     # 自定义设置
     custom_headers: Dict[str, str] = field(default_factory=dict)
 
@@ -76,7 +79,7 @@ class AIConfig:
                 # 加载provider配置
                 if 'provider' in data:
                     provider_data = data['provider']
-                    self.provider = AIProviderConfig(
+                self.provider = AIProviderConfig(
                         provider=provider_data.get('provider', 'openai'),
                         api_key=provider_data.get('api_key'),
                         api_base=provider_data.get('api_base'),
@@ -85,6 +88,7 @@ class AIConfig:
                         temperature=provider_data.get('temperature', 0.7),
                         timeout=provider_data.get('timeout', 30),
                         enabled=provider_data.get('enabled', False),
+                        sample_size=provider_data.get('sample_size', 15),
                         custom_headers=provider_data.get('custom_headers', {}),
                     )
                 

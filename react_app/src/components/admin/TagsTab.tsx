@@ -30,6 +30,7 @@ import {
   AutoAwesome as AutoIcon,
   LocalOffer as TagIcon,
   Info as InfoIcon,
+  Download as ImportIcon,
 } from '@mui/icons-material';
 import api from '../../services/api';
 
@@ -152,6 +153,7 @@ const TagsTab: React.FC = () => {
   const [categories, setCategories] = useState<TagCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [autoTagDialogOpen, setAutoTagDialogOpen] = useState(false);
+  const [initLoading, setInitLoading] = useState(false);
 
   useEffect(() => {
     loadKeywords();
@@ -207,6 +209,23 @@ const TagsTab: React.FC = () => {
     return categories.reduce((sum, cat) => sum + cat.tags.length, 0);
   };
 
+  const handleInitDefaultTags = async () => {
+    if (!confirm('确定要导入预定义的系统标签吗？已存在的标签会自动跳过。')) {
+      return;
+    }
+    
+    setInitLoading(true);
+    try {
+      const response = await api.post('/api/tags/init-defaults');
+      const { created_count, skipped_count, total_predefined } = response.data;
+      alert(`导入完成！\n新创建: ${created_count} 个标签\n已存在: ${skipped_count} 个\n预定义总数: ${total_predefined} 个`);
+    } catch (err: any) {
+      alert('导入失败: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setInitLoading(false);
+    }
+  };
+
   if (loading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 400 }}>
@@ -230,6 +249,15 @@ const TagsTab: React.FC = () => {
             onClick={loadKeywords}
           >
             刷新
+          </Button>
+          <Button
+            variant="outlined"
+            color="success"
+            startIcon={initLoading ? <CircularProgress size={20} /> : <ImportIcon />}
+            onClick={handleInitDefaultTags}
+            disabled={initLoading}
+          >
+            {initLoading ? '导入中...' : '导入预定义标签'}
           </Button>
           <Button
             variant="contained"

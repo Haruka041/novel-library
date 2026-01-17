@@ -345,13 +345,13 @@ class AIService:
             {"role": "user", "content": "请回复'连接成功'"}
         ], max_tokens=20)
     
-    async def analyze_filename_patterns(self, filenames: List[str], sample_size: int = 15) -> Dict[str, Any]:
+    async def analyze_filename_patterns(self, filenames: List[str], sample_size: int = None) -> Dict[str, Any]:
         """
         使用AI分析文件名模式，生成解析规则建议
         
         Args:
             filenames: 文件名列表
-            sample_size: 采样数量（避免token过多，默认15）
+            sample_size: 采样数量（默认使用配置值）
         
         Returns:
             分析结果，包含建议的正则表达式规则
@@ -359,9 +359,10 @@ class AIService:
         if not self.config.is_enabled():
             return {"success": False, "error": "AI功能未启用"}
         
-        # 采样 - 限制数量避免超出上下文（减少到15个以应对reasoning模型）
+        # 使用配置的采样数，如果没有指定则使用配置值
         import random
-        actual_sample = min(sample_size, len(filenames), 15)  # 最多15个
+        configured_sample = sample_size or self.config.provider.sample_size or 15
+        actual_sample = min(configured_sample, len(filenames))
         if len(filenames) > actual_sample:
             samples = random.sample(filenames, actual_sample)
         else:
