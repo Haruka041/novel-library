@@ -20,6 +20,7 @@ from app.core.metadata.mobi_parser import MobiParser
 from app.core.metadata.txt_parser import TxtParser
 from app.utils.file_hash import calculate_file_hash
 from app.utils.logger import log
+from app.core.websocket import manager
 
 
 class BackgroundScanner:
@@ -112,6 +113,9 @@ class BackgroundScanner:
                 task.started_at = datetime.utcnow()
                 await db.commit()
                 
+                # 发送初始状态
+                await self._broadcast_progress(task)
+                
                 log.info(f"开始执行扫描任务: {task_id}")
                 
                 # 初始化 TXT 解析器（需要数据库会话）
@@ -127,6 +131,9 @@ class BackgroundScanner:
                 task.progress = 100
                 await db.commit()
                 
+                # 发送完成状态
+                await self._broadcast_progress(task)
+                
                 log.info(f"扫描任务完成: {task_id}, 添加={task.added_books}, 跳过={task.skipped_books}, 错误={task.error_count}")
                 
             except Exception as e:
@@ -140,6 +147,9 @@ class BackgroundScanner:
                         task.error_message = str(e)[:1000]  # 限制长度
                         task.completed_at = datetime.utcnow()
                         await db.commit()
+                        
+                        # 发送失败状态
+                        await self._broadcast_progress(task)
                 except Exception as update_error:
                     log.error(f"更新任务状态失败: {update_error}")
     
@@ -208,6 +218,7 @@ class BackgroundScanner:
                         if task.total_files > 0:
                             task.progress = min(95, int(task.processed_files / task.total_files * 100))
                         await db.commit()
+                        await self._broadcast_progress(task)
                         log.info(f"扫描进度: {task.processed_files}/{task.total_files} ({task.progress}%)")
         
         # 处理剩余文件
@@ -221,6 +232,21 @@ class BackgroundScanner:
         # 更新书库最后扫描时间
         library.last_scan = datetime.utcnow()
         await db.commit()
+        
+    async def _broadcast_progress(self, task: ScanTask):
+        """广播进度"""
+        await manager.broadcast({
+            "type": "scan_progress",
+            "task_id": task.id,
+            "library_id": task.library_id,
+            "status": task.status,
+            "progress": task.progress,
+            "total_files": task.total_files,
+            "processed_files": task.processed_files,
+            "added_books": task.added_books,
+            "skipped_books": task.skipped_books,
+            "error_count": task.error_count
+        })
     
     def _discover_files_generator(self, directory: Path):
         """

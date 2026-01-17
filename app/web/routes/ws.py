@@ -13,3 +13,4 @@ async def websocket_endpoint(websocket: WebSocket):
             data = await websocket.receive_text()
             # 可以在这里处理客户端发送的消息，如果需要
     except WebSocketDisconnect:
+        manager.disconnect(websocket)

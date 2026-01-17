@@ -68,10 +68,11 @@ app.mount("/static", StaticFiles(directory="app/web/static", html=False), name="
 templates = Jinja2Templates(directory="app/web/templates")
 
 # 导入路由（延迟导入避免循环依赖）
-from app.web.routes import admin, admin_scan, ai, annotations, api, auth, bookmarks, dashboard, fonts, opds, pages, permissions, reader, tags, user
+from app.web.routes import admin, admin_scan, ai, annotations, api, auth, bookmarks, dashboard, fonts, opds, pages, permissions, reader, tags, user, ws
 from app.web.routes import settings as settings_routes  # 避免与app.config.settings冲突
 
 # 注册路由（必须在挂载静态文件之前）
+app.include_router(ws.router, tags=["WebSocket"])
 app.include_router(auth.router, prefix="/api/auth", tags=["认证"])
 app.include_router(api.router, prefix="/api", tags=["API"])
 app.include_router(admin.router, prefix="/api", tags=["管理员"])

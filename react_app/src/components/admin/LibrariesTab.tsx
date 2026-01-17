@@ -579,20 +579,83 @@ export default function LibrariesTab() {
     return colors[rating] || 'default'
   }
 
-  // 轮询活动任务
+  // WebSocket 连接和轮询活动任务
   useEffect(() => {
+    // 建立 WebSocket 连接
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const wsUrl = `${protocol}//${window.location.host}/ws`
+    
+    let ws: WebSocket | null = null;
+    let reconnectTimeout: any = null;
+
+    const connectWs = () => {
+      ws = new WebSocket(wsUrl);
+      
+      ws.onopen = () => {
+        console.log('WebSocket connected');
+      };
+      
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          if (message.type === 'scan_progress') {
+            const task = message as ScanTask & { type: string };
+            const libraryId = task.library_id;
+            
+            // 更新活动任务状态
+            setActiveTasks(prev => {
+              if (task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') {
+                // 任务完成，移除活动任务并刷新历史
+                const newTasks = { ...prev };
+                delete newTasks[libraryId];
+                
+                // 延迟一点刷新历史，确保后端数据已提交
+                setTimeout(() => {
+                  loadLibraries();
+                  loadTaskHistory(libraryId);
+                }, 500);
+                
+                return newTasks;
+              }
+              return { ...prev, [libraryId]: task };
+            });
+          }
+        } catch (e) {
+          console.error('WebSocket message parse error:', e);
+        }
+      };
+      
+      ws.onclose = () => {
+        console.log('WebSocket disconnected, reconnecting in 5s...');
+        reconnectTimeout = setTimeout(connectWs, 5000);
+      };
+
+      ws.onerror = (err) => {
+        console.error('WebSocket error:', err);
+        ws?.close();
+      };
+    };
+
+    connectWs();
+
+    // 依然保留轮询作为后备，但频率降低
     const hasActiveTasks = Object.values(activeTasks).some(
       task => task.status === 'running' || task.status === 'pending'
-    )
+    );
     
+    let interval: any = null;
     if (hasActiveTasks) {
-      const interval = setInterval(() => {
-        updateActiveTasks()
-      }, 2000) // 每2秒更新一次
-      
-      return () => clearInterval(interval)
+      interval = setInterval(() => {
+        updateActiveTasks();
+      }, 10000); // 每10秒轮询一次作为后备
     }
-  }, [activeTasks])
+    
+    return () => {
+      if (ws) ws.close();
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (interval) clearInterval(interval);
+    };
+  }, [activeTasks]) // 依赖 activeTasks 以便在任务状态变化时更新轮询逻辑
 
   const loadLibraries = async () => {
     try {
