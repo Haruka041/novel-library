@@ -311,7 +311,7 @@ async def library_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             
             # 获取可访问的书库
-            library_ids = await get_accessible_library_ids(db, user)
+            library_ids = await get_accessible_library_ids(user, db)
             
             if not library_ids:
                 await update.message.reply_text("暂无可访问的书库")
