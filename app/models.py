@@ -371,6 +371,33 @@ class Annotation(Base):
     )
 
 
+class ReadingSession(Base):
+    """阅读会话（用于统计阅读时长）"""
+    __tablename__ = "reading_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    book_id = Column(Integer, ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    
+    # 会话时间
+    start_time = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    end_time = Column(DateTime, nullable=True)
+    duration_seconds = Column(Integer, default=0)  # 阅读时长（秒）
+    
+    # 阅读进度
+    progress = Column(Float, nullable=True)  # 0.0 - 1.0
+    
+    # 客户端信息
+    ip_address = Column(String(45), nullable=True)
+    device_info = Column(String(255), nullable=True)
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # 关系
+    user = relationship("User", backref="reading_sessions")
+    book = relationship("Book", backref="reading_sessions")
+
+
 class FilenamePattern(Base):
     """文件名解析规则"""
     __tablename__ = "filename_patterns"

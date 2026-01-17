@@ -1,5 +1,5 @@
 import { Box, Typography, Card, CardContent, Avatar, Divider, List, ListItem, ListItemIcon, ListItemText, ToggleButtonGroup, ToggleButton, Chip, Button, IconButton, CircularProgress, Snackbar, Alert, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material'
-import { Person, Lock, History, Favorite, DarkMode, LightMode, SettingsBrightness, Logout, PhotoSizeSelectLarge, ViewList, AllInclusive, Palette, Image, Check, Telegram, Link, LinkOff, ContentCopy, CheckCircle } from '@mui/icons-material'
+import { Person, Lock, History, Favorite, DarkMode, LightMode, SettingsBrightness, Logout, PhotoSizeSelectLarge, ViewList, AllInclusive, Palette, Image, Check, Telegram, Link, LinkOff, ContentCopy, CheckCircle, TrendingUp } from '@mui/icons-material'
 import { useAuthStore } from '../stores/authStore'
 import { useThemeStore, PRESET_COLORS } from '../stores/themeStore'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -406,6 +406,13 @@ export default function ProfilePage() {
             </ListItemIcon>
             <ListItemText primary="阅读历史" secondary="查看阅读记录" />
             <Chip label={historyCount} size="small" color="secondary" />
+          </ListItem>
+          <Divider />
+          <ListItem button onClick={() => navigate('/stats')}>
+            <ListItemIcon>
+              <TrendingUp />
+            </ListItemIcon>
+            <ListItemText primary="阅读统计" secondary="查看阅读时长和习惯分析" />
           </ListItem>
           <Divider />
           <ListItem button onClick={logout}>

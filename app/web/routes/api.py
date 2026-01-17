@@ -2,17 +2,18 @@
 API路由
 提供REST API接口
 """
+from datetime import datetime, timezone, timedelta, date
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, select, and_, cast, Date
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.core.scanner import Scanner
 from app.database import get_db
-from app.models import Author, Book, Library, ReadingProgress, User
+from app.models import Author, Book, Library, ReadingProgress, ReadingSession, User
 from app.web.routes.auth import get_current_admin, get_current_user
 from app.web.routes.dependencies import get_accessible_book, get_accessible_library
 from app.utils.logger import log
@@ -1207,3 +1208,324 @@ async def end_reading_session(
     await db.commit()
     
     return {"status": "ended"}
+
+
+@router.get("/stats/reading/overview")
+async def get_reading_stats_overview(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """获取阅读统计概览"""
+    # 总阅读时长（秒）
+    total_duration_result = await db.execute(
+        select(func.sum(ReadingSession.duration_seconds))
+        .where(ReadingSession.user_id == current_user.id)
+    )
+    total_duration_seconds = total_duration_result.scalar() or 0
+    
+    # 总阅读会话数
+    session_count_result = await db.execute(
+        select(func.count(ReadingSession.id))
+        .where(ReadingSession.user_id == current_user.id)
+    )
+    total_sessions = session_count_result.scalar() or 0
+    
+    # 阅读过的书籍数量（有阅读会话记录）
+    books_read_result = await db.execute(
+        select(func.count(func.distinct(ReadingSession.book_id)))
+        .where(ReadingSession.user_id == current_user.id)
+    )
+    books_read = books_read_result.scalar() or 0
+    
+    # 已完成阅读的书籍数量
+    finished_books_result = await db.execute(
+        select(func.count(ReadingProgress.id))
+        .where(ReadingProgress.user_id == current_user.id)
+        .where(ReadingProgress.finished == True)
+    )
+    finished_books = finished_books_result.scalar() or 0
+    
+    # 今日阅读时长
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    today_duration_result = await db.execute(
+        select(func.sum(ReadingSession.duration_seconds))
+        .where(ReadingSession.user_id == current_user.id)
+        .where(ReadingSession.start_time >= today_start)
+    )
+    today_duration = today_duration_result.scalar() or 0
+    
+    # 本周阅读时长（从周一开始）
+    today = datetime.now(timezone.utc).date()
+    week_start = today - timedelta(days=today.weekday())
+    week_start_dt = datetime.combine(week_start, datetime.min.time()).replace(tzinfo=timezone.utc)
+    week_duration_result = await db.execute(
+        select(func.sum(ReadingSession.duration_seconds))
+        .where(ReadingSession.user_id == current_user.id)
+        .where(ReadingSession.start_time >= week_start_dt)
+    )
+    week_duration = week_duration_result.scalar() or 0
+    
+    # 本月阅读时长
+    month_start = today.replace(day=1)
+    month_start_dt = datetime.combine(month_start, datetime.min.time()).replace(tzinfo=timezone.utc)
+    month_duration_result = await db.execute(
+        select(func.sum(ReadingSession.duration_seconds))
+        .where(ReadingSession.user_id == current_user.id)
+        .where(ReadingSession.start_time >= month_start_dt)
+    )
+    month_duration = month_duration_result.scalar() or 0
+    
+    # 平均每日阅读时长（过去30天）
+    thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
+    avg_daily_result = await db.execute(
+        select(func.sum(ReadingSession.duration_seconds))
+        .where(ReadingSession.user_id == current_user.id)
+        .where(ReadingSession.start_time >= thirty_days_ago)
+    )
+    last_30_days_total = avg_daily_result.scalar() or 0
+    avg_daily_seconds = last_30_days_total / 30
+    
+    return {
+        "total_duration_seconds": total_duration_seconds,
+        "total_duration_formatted": _format_duration(total_duration_seconds),
+        "total_sessions": total_sessions,
+        "books_read": books_read,
+        "finished_books": finished_books,
+        "today_duration_seconds": today_duration,
+        "today_duration_formatted": _format_duration(today_duration),
+        "week_duration_seconds": week_duration,
+        "week_duration_formatted": _format_duration(week_duration),
+        "month_duration_seconds": month_duration,
+        "month_duration_formatted": _format_duration(month_duration),
+        "avg_daily_seconds": int(avg_daily_seconds),
+        "avg_daily_formatted": _format_duration(int(avg_daily_seconds)),
+    }
+
+
+@router.get("/stats/reading/daily")
+async def get_daily_reading_stats(
+    days: int = Query(30, ge=1, le=365, description="统计天数"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """获取每日阅读时长统计"""
+    start_date = datetime.now(timezone.utc) - timedelta(days=days)
+    
+    # 按日期分组统计阅读时长
+    # 使用 SQLite 的 date() 函数提取日期
+    result = await db.execute(
+        select(
+            func.date(ReadingSession.start_time).label('date'),
+            func.sum(ReadingSession.duration_seconds).label('duration'),
+            func.count(ReadingSession.id).label('sessions')
+        )
+        .where(ReadingSession.user_id == current_user.id)
+        .where(ReadingSession.start_time >= start_date)
+        .group_by(func.date(ReadingSession.start_time))
+        .order_by(func.date(ReadingSession.start_time))
+    )
+    
+    daily_stats = []
+    for row in result:
+        daily_stats.append({
+            "date": row.date,
+            "duration_seconds": row.duration or 0,
+            "duration_formatted": _format_duration(row.duration or 0),
+            "sessions": row.sessions or 0
+        })
+    
+    # 补充没有阅读记录的日期
+    full_daily_stats = []
+    current_date = start_date.date()
+    end_date = datetime.now(timezone.utc).date()
+    existing_dates = {row["date"] for row in daily_stats}
+    
+    while current_date <= end_date:
+        date_str = current_date.isoformat()
+        if date_str in existing_dates:
+            # 找到对应的记录
+            for row in daily_stats:
+                if row["date"] == date_str:
+                    full_daily_stats.append(row)
+                    break
+        else:
+            full_daily_stats.append({
+                "date": date_str,
+                "duration_seconds": 0,
+                "duration_formatted": "0分钟",
+                "sessions": 0
+            })
+        current_date += timedelta(days=1)
+    
+    return {
+        "days": days,
+        "start_date": start_date.date().isoformat(),
+        "end_date": datetime.now(timezone.utc).date().isoformat(),
+        "daily_stats": full_daily_stats
+    }
+
+
+@router.get("/stats/reading/hourly")
+async def get_hourly_reading_distribution(
+    days: int = Query(30, ge=1, le=365, description="统计天数"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """获取每小时阅读分布（阅读习惯分析）"""
+    start_date = datetime.now(timezone.utc) - timedelta(days=days)
+    
+    # 按小时分组统计
+    # 使用 strftime 提取小时
+    result = await db.execute(
+        select(
+            func.strftime('%H', ReadingSession.start_time).label('hour'),
+            func.sum(ReadingSession.duration_seconds).label('duration'),
+            func.count(ReadingSession.id).label('sessions')
+        )
+        .where(ReadingSession.user_id == current_user.id)
+        .where(ReadingSession.start_time >= start_date)
+        .group_by(func.strftime('%H', ReadingSession.start_time))
+        .order_by(func.strftime('%H', ReadingSession.start_time))
+    )
+    
+    hourly_data = {str(i).zfill(2): {"duration_seconds": 0, "sessions": 0} for i in range(24)}
+    
+    for row in result:
+        hour = row.hour
+        if hour:
+            hourly_data[hour] = {
+                "duration_seconds": row.duration or 0,
+                "sessions": row.sessions or 0
+            }
+    
+    # 转换为列表格式
+    hourly_stats = []
+    for hour in range(24):
+        hour_str = str(hour).zfill(2)
+        data = hourly_data[hour_str]
+        hourly_stats.append({
+            "hour": hour,
+            "hour_label": f"{hour}:00-{hour+1}:00" if hour < 23 else "23:00-00:00",
+            "duration_seconds": data["duration_seconds"],
+            "duration_formatted": _format_duration(data["duration_seconds"]),
+            "sessions": data["sessions"]
+        })
+    
+    return {
+        "days": days,
+        "hourly_stats": hourly_stats
+    }
+
+
+@router.get("/stats/reading/books")
+async def get_book_reading_stats(
+    limit: int = Query(20, ge=1, le=100, description="返回数量"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """获取各书籍阅读时长统计"""
+    # 按书籍分组统计阅读时长
+    result = await db.execute(
+        select(
+            ReadingSession.book_id,
+            func.sum(ReadingSession.duration_seconds).label('total_duration'),
+            func.count(ReadingSession.id).label('session_count'),
+            func.max(ReadingSession.start_time).label('last_read')
+        )
+        .where(ReadingSession.user_id == current_user.id)
+        .group_by(ReadingSession.book_id)
+        .order_by(func.sum(ReadingSession.duration_seconds).desc())
+        .limit(limit)
+    )
+    
+    book_stats = []
+    for row in result:
+        # 获取书籍信息
+        book_result = await db.execute(
+            select(Book).options(joinedload(Book.author)).where(Book.id == row.book_id)
+        )
+        book = book_result.scalar_one_or_none()
+        
+        if book:
+            # 获取阅读进度
+            progress_result = await db.execute(
+                select(ReadingProgress)
+                .where(ReadingProgress.user_id == current_user.id)
+                .where(ReadingProgress.book_id == row.book_id)
+            )
+            progress = progress_result.scalar_one_or_none()
+            
+            book_stats.append({
+                "book_id": row.book_id,
+                "title": book.title,
+                "author_name": book.author.name if book.author else None,
+                "total_duration_seconds": row.total_duration or 0,
+                "total_duration_formatted": _format_duration(row.total_duration or 0),
+                "session_count": row.session_count or 0,
+                "last_read": row.last_read.isoformat() if row.last_read else None,
+                "progress": progress.progress if progress else 0,
+                "finished": progress.finished if progress else False
+            })
+    
+    return {
+        "limit": limit,
+        "book_stats": book_stats
+    }
+
+
+@router.get("/stats/reading/recent-sessions")
+async def get_recent_reading_sessions(
+    limit: int = Query(20, ge=1, le=100, description="返回数量"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """获取最近的阅读会话记录"""
+    result = await db.execute(
+        select(ReadingSession)
+        .where(ReadingSession.user_id == current_user.id)
+        .order_by(ReadingSession.start_time.desc())
+        .limit(limit)
+    )
+    
+    sessions = result.scalars().all()
+    
+    session_list = []
+    for session in sessions:
+        # 获取书籍信息
+        book_result = await db.execute(
+            select(Book).options(joinedload(Book.author)).where(Book.id == session.book_id)
+        )
+        book = book_result.scalar_one_or_none()
+        
+        session_list.append({
+            "id": session.id,
+            "book_id": session.book_id,
+            "book_title": book.title if book else "未知书籍",
+            "author_name": book.author.name if book and book.author else None,
+            "start_time": session.start_time.isoformat() if session.start_time else None,
+            "end_time": session.end_time.isoformat() if session.end_time else None,
+            "duration_seconds": session.duration_seconds or 0,
+            "duration_formatted": _format_duration(session.duration_seconds or 0),
+            "progress": session.progress,
+            "device_info": session.device_info
+        })
+    
+    return {
+        "limit": limit,
+        "sessions": session_list
+    }
+
+
+def _format_duration(seconds: int) -> str:
+    """格式化时长显示"""
+    if seconds < 60:
+        return f"{seconds}秒"
+    elif seconds < 3600:
+        minutes = seconds // 60
+        return f"{minutes}分钟"
+    else:
+        hours = seconds // 3600
+        minutes = (seconds % 3600) // 60
+        if minutes > 0:
+            return f"{hours}小时{minutes}分钟"
+        return f"{hours}小时"

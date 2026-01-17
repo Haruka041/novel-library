@@ -203,3 +203,92 @@ export interface AnnotationStats {
   by_color: Record<string, number>
   books_with_annotations: number
 }
+
+// ===== 阅读统计相关类型 =====
+
+// 阅读统计概览
+export interface ReadingStatsOverview {
+  total_duration_seconds: number
+  total_duration_formatted: string
+  total_sessions: number
+  books_read: number
+  finished_books: number
+  today_duration_seconds: number
+  today_duration_formatted: string
+  week_duration_seconds: number
+  week_duration_formatted: string
+  month_duration_seconds: number
+  month_duration_formatted: string
+  avg_daily_seconds: number
+  avg_daily_formatted: string
+}
+
+// 每日阅读统计项
+export interface DailyReadingStat {
+  date: string
+  duration_seconds: number
+  duration_formatted: string
+  sessions: number
+}
+
+// 每日阅读统计响应
+export interface DailyReadingStatsResponse {
+  days: number
+  start_date: string
+  end_date: string
+  daily_stats: DailyReadingStat[]
+}
+
+// 每小时阅读分布项
+export interface HourlyReadingStat {
+  hour: number
+  hour_label: string
+  duration_seconds: number
+  duration_formatted: string
+  sessions: number
+}
+
+// 每小时阅读分布响应
+export interface HourlyReadingStatsResponse {
+  days: number
+  hourly_stats: HourlyReadingStat[]
+}
+
+// 书籍阅读统计项
+export interface BookReadingStat {
+  book_id: number
+  title: string
+  author_name: string | null
+  total_duration_seconds: number
+  total_duration_formatted: string
+  session_count: number
+  last_read: string | null
+  progress: number
+  finished: boolean
+}
+
+// 书籍阅读统计响应
+export interface BookReadingStatsResponse {
+  limit: number
+  book_stats: BookReadingStat[]
+}
+
+// 阅读会话记录
+export interface ReadingSessionRecord {
+  id: number
+  book_id: number
+  book_title: string
+  author_name: string | null
+  start_time: string | null
+  end_time: string | null
+  duration_seconds: number
+  duration_formatted: string
+  progress: number | null
+  device_info: string | null
+}
+
+// 最近阅读会话响应
+export interface RecentSessionsResponse {
+  limit: number
+  sessions: ReadingSessionRecord[]
+}
