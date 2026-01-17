@@ -161,7 +161,7 @@ export default function SettingsTab() {
       setError(null)
       setSuccess(false)
       
-      await api.put('/api/settings', settings)
+      await api.put('/api/admin/settings', settings)
       setSuccess(true)
       
       // 重置 serverSettingsLoaded 以便刷新全局设置

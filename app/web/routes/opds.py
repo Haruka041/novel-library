@@ -1,17 +1,21 @@
 """
 OPDS 路由
 提供符合 OPDS 1.2 规范的目录服务
+支持 HTTP Basic Auth 认证（OPDS 阅读器标准）
 """
 import math
 from typing import Optional
+import base64
 
-from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response, HTTPException, Header
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.database import get_db
-from app.models import Author, Book
+from app.models import Author, Book, User
+from app.security import verify_password
 from app.utils.logger import log
 from app.utils.opds_builder import (
     build_opds_acquisition_feed,
@@ -20,10 +24,38 @@ from app.utils.opds_builder import (
     build_opds_search_descriptor,
 )
 from app.utils.permissions import check_book_access, get_accessible_library_ids
-from app.web.routes.auth import get_current_user
-from app.models import User
 
 router = APIRouter()
+security = HTTPBasic(auto_error=False)
+
+
+async def get_opds_user(
+    request: Request,
+    credentials: HTTPBasicCredentials = Depends(security),
+    db: AsyncSession = Depends(get_db)
+) -> User:
+    """
+    OPDS 用户认证 - 支持 HTTP Basic Auth
+    OPDS 客户端（如古腾堡、Calibre等）使用 Basic Auth 而非 JWT
+    """
+    # 首先检查是否有 Basic Auth 头
+    if credentials:
+        username = credentials.username
+        password = credentials.password
+        
+        # 查找用户
+        result = await db.execute(select(User).where(User.username == username))
+        user = result.scalar_one_or_none()
+        
+        if user and verify_password(password, user.password_hash):
+            return user
+    
+    # 没有认证或认证失败，返回 401 要求认证
+    raise HTTPException(
+        status_code=401,
+        detail="需要认证",
+        headers={"WWW-Authenticate": 'Basic realm="Novel Library OPDS"'}
+    )
 
 
 def get_base_url(request: Request) -> str:
@@ -35,7 +67,7 @@ def get_base_url(request: Request) -> str:
 @router.get("/")
 async def opds_root(
     request: Request,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_opds_user)
 ):
     """
     OPDS 根目录
@@ -56,7 +88,7 @@ async def opds_recent_books(
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_opds_user)
 ):
     """
     最新书籍 Feed
@@ -123,7 +155,7 @@ async def opds_recent_books(
 async def opds_authors_index(
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_opds_user)
 ):
     """
     作者索引 Feed
@@ -185,7 +217,7 @@ async def opds_author_books(
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_opds_user)
 ):
     """
     作者书籍 Feed
@@ -271,7 +303,7 @@ async def opds_search(
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_opds_user)
 ):
     """
     搜索 Feed
@@ -375,7 +407,7 @@ async def opds_search_descriptor(request: Request):
 async def opds_download_book(
     book_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_opds_user)
 ):
     """
     下载书籍

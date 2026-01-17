@@ -138,15 +138,27 @@ async def create_library(
     current_user: User = Depends(get_current_admin)
 ):
     """创建新书库（需要管理员权限）"""
+    from app.models import LibraryPath
+    
     library = Library(
         name=library_data.name,
         path=library_data.path
     )
     db.add(library)
+    await db.flush()  # 获取 library.id
+    
+    # 同时将第一个路径添加到 library_paths 表
+    library_path = LibraryPath(
+        library_id=library.id,
+        path=library_data.path,
+        enabled=True
+    )
+    db.add(library_path)
+    
     await db.commit()
     await db.refresh(library)
     
-    log.info(f"创建书库: {library.name}")
+    log.info(f"创建书库: {library.name}, 路径: {library_data.path}")
     return library
 
 
