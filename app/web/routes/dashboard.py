@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.models import (
-    User, Book, BookVersion, Library, LibraryPermission, 
+    User, Book, BookVersion, BookGroup, Library, LibraryPermission, 
     ReadingProgress, Author, Favorite
 )
 from app.web.routes.dependencies import get_current_user
@@ -107,6 +107,44 @@ async def get_user_accessible_libraries(db: AsyncSession, user: User) -> List[Li
         all_libraries[lib.id] = lib
     
     return list(all_libraries.values())
+
+
+def filter_books_by_group(books: List[Book]) -> List[Book]:
+    """
+    过滤书籍列表，去除同组重复书籍
+    - 如果书籍有 group_id，只保留组内的主书籍（primary_book_id）
+    - 如果书籍没有 group_id，正常保留
+    """
+    seen_groups = set()
+    filtered = []
+    
+    for book in books:
+        if book.group_id:
+            # 书籍属于某个组
+            if book.group_id in seen_groups:
+                continue  # 跳过已处理的组
+            seen_groups.add(book.group_id)
+            
+            # 检查是否为主书籍
+            if book.group and book.group.primary_book_id:
+                # 只有主书籍才加入结果
+                if book.id == book.group.primary_book_id:
+                    filtered.append(book)
+                # 不是主书籍，但是第一个遇到的该组书籍，暂时加入
+                # （以防 primary_book_id 不在当前列表中）
+                elif book.id == book.group_id:
+                    pass  # 跳过，等待主书籍
+                else:
+                    # 组存在但此书不是主书籍，跳过
+                    continue
+            else:
+                # 组没有指定主书籍，使用第一个遇到的
+                filtered.append(book)
+        else:
+            # 没有组，直接加入
+            filtered.append(book)
+    
+    return filtered
 
 
 def book_to_summary(book: Book, base_url: str = "") -> BookSummary:
@@ -210,23 +248,28 @@ async def get_dashboard(
                 library_name=book.library.name
             ))
     
-    # 4. 获取每个书库的最新书籍
+    # 4. 获取每个书库的最新书籍（去除同组重复）
     latest_by_library = []
     for library in accessible_libraries:
+        # 多查询一些书籍以便过滤后仍有足够数量
         result = await db.execute(
             select(Book).options(
                 selectinload(Book.author),
-                selectinload(Book.versions)
+                selectinload(Book.versions),
+                selectinload(Book.group)  # 加载组信息
             ).where(Book.library_id == library.id)
-            .order_by(desc(Book.added_at)).limit(10)
+            .order_by(desc(Book.added_at)).limit(30)
         )
-        latest_books = list(result.scalars().all())
+        all_books = list(result.scalars().all())
         
-        if latest_books:
+        # 过滤同组重复书籍
+        filtered_books = filter_books_by_group(all_books)[:10]
+        
+        if filtered_books:
             latest_by_library.append(LibraryLatest(
                 library_id=library.id,
                 library_name=library.name,
-                books=[book_to_summary(book) for book in latest_books]
+                books=[book_to_summary(book) for book in filtered_books]
             ))
     
     # 5. 获取收藏数量
@@ -327,7 +370,7 @@ async def get_library_latest(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """获取指定书库的最新书籍"""
+    """获取指定书库的最新书籍（自动去重同组书籍）"""
     
     # 验证权限
     accessible_libraries = await get_user_accessible_libraries(db, current_user)
@@ -343,17 +386,23 @@ async def get_library_latest(
     if not library:
         raise HTTPException(status_code=404, detail="书库不存在")
     
+    # 多查询一些以便过滤后有足够数量
+    fetch_limit = limit * 3 if limit < 50 else limit + 50
     result = await db.execute(
         select(Book).options(
             selectinload(Book.author),
-            selectinload(Book.versions)
+            selectinload(Book.versions),
+            selectinload(Book.group)
         ).where(Book.library_id == library_id)
-        .order_by(desc(Book.added_at)).limit(limit)
+        .order_by(desc(Book.added_at)).limit(fetch_limit)
     )
-    latest_books = list(result.scalars().all())
+    all_books = list(result.scalars().all())
+    
+    # 过滤同组重复书籍
+    filtered_books = filter_books_by_group(all_books)[:limit]
     
     return LibraryLatest(
         library_id=library.id,
         library_name=library.name,
-        books=[book_to_summary(book) for book in latest_books]
+        books=[book_to_summary(book) for book in filtered_books]
     )
