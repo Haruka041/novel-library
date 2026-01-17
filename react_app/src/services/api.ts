@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { useAuthStore } from '../stores/authStore'
+import { Author, LibrarySummary } from '../types'
 
 const api = axios.create({
   baseURL: '',
@@ -80,6 +81,18 @@ export const readingStatsApi = {
     })
     return response.data
   },
+}
+
+export const commonApi = {
+  getAuthors: async (): Promise<Author[]> => {
+    const response = await api.get('/api/authors')
+    return response.data
+  },
+  
+  getLibraries: async (): Promise<LibrarySummary[]> => {
+    const response = await api.get('/api/libraries')
+    return response.data
+  }
 }
 
 export default api

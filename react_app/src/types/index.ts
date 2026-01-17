@@ -1,3 +1,10 @@
+// 作者
+export interface Author {
+  id: number
+  name: string
+  book_count: number
+}
+
 // 书籍摘要
 export interface BookSummary {
   id: number

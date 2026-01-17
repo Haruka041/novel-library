@@ -64,6 +64,7 @@ def get_base_url(request: Request) -> str:
     return f"{request.url.scheme}://{request.url.netloc}"
 
 
+@router.get("")
 @router.get("/")
 async def opds_root(
     request: Request,

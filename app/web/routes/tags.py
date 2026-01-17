@@ -243,6 +243,104 @@ async def list_tags(
     ]
 
 
+@router.get("/tags/library/{library_id}")
+async def list_tags_by_library(
+    library_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    获取指定书库中使用的标签及数量
+    
+    Args:
+        library_id: 书库 ID
+        db: 数据库会话
+        current_user: 当前用户
+        
+    Returns:
+        标签列表（带书籍数量）
+    """
+    from sqlalchemy import func
+    
+    # 查询书库中书籍使用的标签及数量
+    query = (
+        select(
+            Tag.id,
+            Tag.name,
+            Tag.type,
+            Tag.description,
+            func.count(BookTag.book_id).label('book_count')
+        )
+        .join(BookTag, BookTag.tag_id == Tag.id)
+        .join(Book, Book.id == BookTag.book_id)
+        .where(Book.library_id == library_id)
+        .group_by(Tag.id, Tag.name, Tag.type, Tag.description)
+        .having(func.count(BookTag.book_id) > 0)
+        .order_by(func.count(BookTag.book_id).desc(), Tag.name)
+    )
+    
+    result = await db.execute(query)
+    rows = result.all()
+    
+    return [
+        {
+            "id": row.id,
+            "name": row.name,
+            "type": row.type,
+            "description": row.description,
+            "book_count": row.book_count
+        }
+        for row in rows
+    ]
+
+
+@router.get("/tags/all-libraries")
+async def list_tags_all_libraries(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    获取所有书库中使用的标签及数量
+    
+    Args:
+        db: 数据库会话
+        current_user: 当前用户
+        
+    Returns:
+        标签列表（带书籍数量）
+    """
+    from sqlalchemy import func
+    
+    # 查询所有书籍使用的标签及数量
+    query = (
+        select(
+            Tag.id,
+            Tag.name,
+            Tag.type,
+            Tag.description,
+            func.count(BookTag.book_id).label('book_count')
+        )
+        .join(BookTag, BookTag.tag_id == Tag.id)
+        .group_by(Tag.id, Tag.name, Tag.type, Tag.description)
+        .having(func.count(BookTag.book_id) > 0)
+        .order_by(func.count(BookTag.book_id).desc(), Tag.name)
+    )
+    
+    result = await db.execute(query)
+    rows = result.all()
+    
+    return [
+        {
+            "id": row.id,
+            "name": row.name,
+            "type": row.type,
+            "description": row.description,
+            "book_count": row.book_count
+        }
+        for row in rows
+    ]
+
+
 @router.get("/tags/{tag_id}", response_model=TagResponse)
 async def get_tag(
     tag_id: int,
