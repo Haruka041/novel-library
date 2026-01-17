@@ -530,7 +530,7 @@ class AIService:
             response = await self.chat([
                 {"role": "system", "content": "你是专业的小说文件名解析助手。分析文件名并提取书名、作者等元数据。只返回JSON格式数据。"},
                 {"role": "user", "content": prompt}
-            ], max_tokens=4000)
+            ])  # 使用用户配置的 max_tokens
             
             if not response.success:
                 log.error(f"批次 {batch_idx + 1} 分析失败: {response.error}")
@@ -542,7 +542,7 @@ class AIService:
                     response = await self.chat([
                         {"role": "system", "content": "你是专业的小说文件名解析助手。分析文件名并提取书名、作者等元数据。只返回JSON格式数据。"},
                         {"role": "user", "content": prompt}
-                    ], max_tokens=4000)
+                    ])  # 使用用户配置的 max_tokens
                 
                 if not response.success:
                     continue
@@ -637,7 +637,7 @@ class AIService:
         response = await self.chat([
             {"role": "system", "content": "你是一个专业的文件名解析助手。只返回JSON格式数据。"},
             {"role": "user", "content": prompt}
-        ], max_tokens=500)
+        ])  # 使用用户配置的 max_tokens
         
         if not response.success:
             return {"success": False, "error": response.error}
