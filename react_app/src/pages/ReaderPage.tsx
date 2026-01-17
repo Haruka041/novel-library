@@ -78,7 +78,7 @@ export default function ReaderPage() {
   // 章节加载状态（新逻辑）
   const [chapters, setChapters] = useState<TocChapter[]>([])  // 完整目录
   const [loadedChapters, setLoadedChapters] = useState<LoadedChapter[]>([])  // 已加载的章节内容
-  const [loadedRange, setLoadedRange] = useState<{start: number, end: number}>({start: 0, end: 0})
+  const [loadedRange, setLoadedRange] = useState<{start: number, end: number}>({start: -1, end: -1})
   const [currentChapter, setCurrentChapter] = useState(0)
   const [totalChapters, setTotalChapters] = useState(0)
   const [totalLength, setTotalLength] = useState(0)
@@ -388,8 +388,8 @@ export default function ReaderPage() {
   const loadChapterContent = async (chapterIndex: number, buffer: number = 2) => {
     if (loadingChapter) return
     
-    // 检查是否已加载
-    if (chapterIndex >= loadedRange.start && chapterIndex <= loadedRange.end) {
+    // 检查是否已加载（注意：loadedChapters 必须有内容才能跳转）
+    if (loadedChapters.length > 0 && chapterIndex >= loadedRange.start && chapterIndex <= loadedRange.end) {
       // 已加载，直接跳转
       scrollToChapter(chapterIndex)
       return
