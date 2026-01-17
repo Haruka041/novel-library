@@ -1,12 +1,13 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   Box, Typography, Button, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, Paper, IconButton, Chip, Alert, CircularProgress,
   Card, CardContent, Grid, Switch, FormControlLabel, Dialog, DialogTitle,
   DialogContent, DialogActions
 } from '@mui/material'
-import { Backup, Download, Delete, Restore, PlayArrow, Schedule } from '@mui/icons-material'
+import { Backup, Download, Delete, Restore, PlayArrow, Schedule, Upload } from '@mui/icons-material'
 import api from '../../services/api'
+import { useAuthStore } from '../../stores/authStore'
 
 interface BackupInfo {
   id: string
@@ -42,10 +43,16 @@ export default function BackupTab() {
   const [scheduler, setScheduler] = useState<SchedulerStatus | null>(null)
   const [creating, setCreating] = useState(false)
   
+  // 上传相关
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  
   // 恢复对话框
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false)
   const [selectedBackup, setSelectedBackup] = useState<BackupInfo | null>(null)
   const [restoring, setRestoring] = useState(false)
+
+  const token = useAuthStore(state => state.token)
 
   useEffect(() => {
     loadData()
@@ -92,7 +99,46 @@ export default function BackupTab() {
   }
 
   const handleDownload = (backup: BackupInfo) => {
-    window.open(`/api/admin/backup/download/${backup.id}`, '_blank')
+    // 使用 token 进行下载鉴权
+    window.open(`/api/admin/backup/download/${backup.id}?token=${token}`, '_blank')
+  }
+
+  const handleUploadClick = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    if (!file.name.endsWith('.zip')) {
+      setError('仅支持 ZIP 格式的备份文件')
+      return
+    }
+
+    const formData = new FormData()
+    formData.append('file', file)
+
+    try {
+      setUploading(true)
+      setError('')
+      await api.post('/api/admin/backup/upload', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      })
+      setSuccess('备份上传成功')
+      loadData()
+    } catch (err) {
+      console.error('上传备份失败:', err)
+      setError('上传备份失败')
+    } finally {
+      setUploading(false)
+      // 清空 input，允许重复上传同一文件
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
+    }
   }
 
   const handleDelete = async (backup: BackupInfo) => {
@@ -236,10 +282,27 @@ export default function BackupTab() {
           variant="contained"
           startIcon={<Backup />}
           onClick={handleCreateBackup}
-          disabled={creating}
+          disabled={creating || uploading}
         >
           {creating ? '创建中...' : '创建备份'}
         </Button>
+        
+        <Button
+          variant="outlined"
+          startIcon={<Upload />}
+          onClick={handleUploadClick}
+          disabled={creating || uploading}
+        >
+          {uploading ? '上传中...' : '上传备份'}
+        </Button>
+        <input
+          type="file"
+          ref={fileInputRef}
+          style={{ display: 'none' }}
+          accept=".zip"
+          onChange={handleFileChange}
+        />
+        
         {scheduler?.auto_backup_enabled && (
           <Button
             variant="outlined"

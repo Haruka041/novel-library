@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models import FilenamePattern, Library, LibraryPermission, LibraryTag, Book, User, BookTag, Tag
 from app.web.routes.auth import get_current_user
-from app.security import hash_password
+from app.security import hash_password, decode_access_token
 from app.utils.filename_analyzer import FilenameAnalyzer
 from app.utils.logger import log
 from app.core.backup import backup_manager
@@ -1329,28 +1329,81 @@ async def list_backups(
 @router.get("/admin/backup/download/{backup_id}")
 async def download_backup(
     backup_id: str,
-    current_user: User = Depends(admin_required)
+    token: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user)
 ):
     """
     下载备份文件（管理员）
+    支持通过 Header 或 Query Param 传递 token
     
     参数：
     - backup_id: 备份ID
+    - token: URL参数中的token
     """
     from pathlib import Path
+    
+    # 验证权限
+    user = current_user
+    if not user and token:
+        try:
+            payload = decode_access_token(token)
+            username = payload.get("sub")
+            if username:
+                result = await db.execute(select(User).where(User.username == username))
+                user = result.scalar_one_or_none()
+        except Exception:
+            pass
+            
+    if not user or not user.is_admin:
+        raise HTTPException(status_code=403, detail="需要管理员权限")
     
     backup_file = Path(backup_manager.backup_dir) / f"{backup_id}.zip"
     
     if not backup_file.exists():
         raise HTTPException(status_code=404, detail="备份文件不存在")
     
-    log.info(f"管理员 {current_user.username} 下载了备份: {backup_id}")
+    log.info(f"管理员 {user.username} 下载了备份: {backup_id}")
     
     return FileResponse(
         path=str(backup_file),
         filename=f"{backup_id}.zip",
         media_type="application/zip"
     )
+
+
+@router.post("/admin/backup/upload")
+async def upload_backup(
+    file: UploadFile = File(...),
+    current_user: User = Depends(admin_required)
+):
+    """
+    上传备份文件（管理员）
+    """
+    from pathlib import Path
+    import shutil
+    
+    if not file.filename.endswith('.zip'):
+        raise HTTPException(status_code=400, detail="仅支持ZIP格式的备份文件")
+        
+    try:
+        # 使用文件名作为backup_id（去掉.zip后缀）
+        backup_id = file.filename[:-4]
+        file_path = Path(backup_manager.backup_dir) / file.filename
+        
+        # 确保备份目录存在
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        log.info(f"管理员 {current_user.username} 上传了备份: {backup_id}")
+        
+        return {"message": "备份上传成功", "backup_id": backup_id}
+        
+    except Exception as e:
+        log.error(f"上传备份失败: {e}")
+        raise HTTPException(status_code=500, detail=f"上传备份失败: {str(e)}")
 
 
 @router.delete("/admin/backup/{backup_id}")
