@@ -150,3 +150,56 @@ export interface GetBookGroupResponse {
   grouped_books: GroupedBook[]
   is_grouped: boolean
 }
+
+// 批注/笔记
+export interface Annotation {
+  id: number
+  user_id: number
+  book_id: number
+  chapter_index: number
+  chapter_title: string | null
+  start_offset: number
+  end_offset: number
+  selected_text: string
+  note: string | null
+  annotation_type: 'highlight' | 'note' | 'underline'
+  color: 'yellow' | 'green' | 'blue' | 'red' | 'purple'
+  created_at: string
+  updated_at: string
+}
+
+// 创建批注请求
+export interface AnnotationCreate {
+  book_id: number
+  chapter_index: number
+  chapter_title?: string
+  start_offset: number
+  end_offset: number
+  selected_text: string
+  note?: string
+  annotation_type?: 'highlight' | 'note' | 'underline'
+  color?: 'yellow' | 'green' | 'blue' | 'red' | 'purple'
+}
+
+// 更新批注请求
+export interface AnnotationUpdate {
+  note?: string
+  color?: string
+  annotation_type?: string
+}
+
+// 批注导出
+export interface AnnotationExport {
+  book_title: string
+  total_annotations: number
+  annotations: Annotation[]
+  exported_at: string
+}
+
+// 批注统计
+export interface AnnotationStats {
+  total_annotations: number
+  by_type: Record<string, number>
+  by_color: Record<string, number>
+  books_with_annotations: number
+}

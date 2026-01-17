@@ -68,7 +68,7 @@ app.mount("/static", StaticFiles(directory="app/web/static", html=False), name="
 templates = Jinja2Templates(directory="app/web/templates")
 
 # 导入路由（延迟导入避免循环依赖）
-from app.web.routes import admin, admin_scan, ai, api, auth, bookmarks, dashboard, fonts, opds, pages, permissions, reader, tags, user
+from app.web.routes import admin, admin_scan, ai, annotations, api, auth, bookmarks, dashboard, fonts, opds, pages, permissions, reader, tags, user
 from app.web.routes import settings as settings_routes  # 避免与app.config.settings冲突
 
 # 注册路由（必须在挂载静态文件之前）
@@ -78,6 +78,7 @@ app.include_router(admin.router, prefix="/api", tags=["管理员"])
 app.include_router(admin_scan.router, prefix="/api", tags=["书库扫描"])
 app.include_router(ai.router, tags=["AI管理"])
 app.include_router(bookmarks.router, prefix="/api", tags=["书签管理"])
+app.include_router(annotations.router, tags=["笔记批注"])
 app.include_router(permissions.router, prefix="/api", tags=["权限管理"])
 app.include_router(tags.router, prefix="/api", tags=["标签管理"])
 app.include_router(user.router, prefix="/api/user", tags=["用户功能"])

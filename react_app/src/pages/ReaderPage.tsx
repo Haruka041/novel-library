@@ -10,7 +10,7 @@ import {
   ArrowBack, Menu, Settings, TextFields, FormatLineSpacing,
   ChevronLeft, ChevronRight, Fullscreen, FullscreenExit,
   PlayArrow, Stop, Timer, SpaceBar, Bookmark, BookmarkBorder,
-  Delete, Add, Search, Close
+  Delete, Add, Search, Close, Edit, FormatColorFill, Download
 } from '@mui/icons-material'
 import ePub, { Book, Rendition } from 'epubjs'
 import api from '../services/api'
@@ -78,6 +78,31 @@ interface SearchResult {
   page: number
   pageSize: number
   totalPages: number
+}
+
+interface AnnotationInfo {
+  id: number
+  user_id: number
+  book_id: number
+  chapter_index: number
+  chapter_title: string | null
+  start_offset: number
+  end_offset: number
+  selected_text: string
+  note: string | null
+  annotation_type: 'highlight' | 'note' | 'underline'
+  color: 'yellow' | 'green' | 'blue' | 'red' | 'purple'
+  created_at: string
+  updated_at: string
+}
+
+// 高亮颜色配置
+const highlightColors = {
+  yellow: { bg: 'rgba(255, 235, 59, 0.4)', name: '黄色' },
+  green: { bg: 'rgba(76, 175, 80, 0.4)', name: '绿色' },
+  blue: { bg: 'rgba(33, 150, 243, 0.4)', name: '蓝色' },
+  red: { bg: 'rgba(244, 67, 54, 0.4)', name: '红色' },
+  purple: { bg: 'rgba(156, 39, 176, 0.4)', name: '紫色' },
 }
 
 // 主题预设 (静读天下风格 - 8种主题)
@@ -155,6 +180,22 @@ export default function ReaderPage() {
   const [searchResults, setSearchResults] = useState<SearchResult | null>(null)
   const [searching, setSearching] = useState(false)
   const [searchPage, setSearchPage] = useState(0)
+  
+  // 批注/高亮
+  const [annotations, setAnnotations] = useState<AnnotationInfo[]>([])
+  const [annotationsOpen, setAnnotationsOpen] = useState(false)
+  const [loadingAnnotations, setLoadingAnnotations] = useState(false)
+  const [selectedText, setSelectedText] = useState('')
+  const [selectionInfo, setSelectionInfo] = useState<{
+    chapterIndex: number
+    startOffset: number
+    endOffset: number
+    rect: DOMRect | null
+  } | null>(null)
+  const [showAnnotationPopup, setShowAnnotationPopup] = useState(false)
+  const [annotationColor, setAnnotationColor] = useState<keyof typeof highlightColors>('yellow')
+  const [annotationNote, setAnnotationNote] = useState('')
+  const [editingAnnotation, setEditingAnnotation] = useState<AnnotationInfo | null>(null)
   
   // 进度 - 基于章节号+章节内偏移
   const [progress, setProgress] = useState(0)
@@ -748,6 +789,290 @@ export default function ReaderPage() {
     }
   }
 
+  // 批注功能
+  const loadAnnotations = async () => {
+    if (!id) return
+    try {
+      setLoadingAnnotations(true)
+      const response = await api.get<AnnotationInfo[]>(`/api/annotations/book/${id}`)
+      setAnnotations(response.data)
+    } catch (err) {
+      console.error('加载批注失败:', err)
+    } finally {
+      setLoadingAnnotations(false)
+    }
+  }
+
+  // 加载章节批注
+  const loadChapterAnnotations = async (chapterIndex: number) => {
+    if (!id) return []
+    try {
+      const response = await api.get<AnnotationInfo[]>(`/api/annotations/book/${id}/chapter/${chapterIndex}`)
+      return response.data
+    } catch (err) {
+      console.error('加载章节批注失败:', err)
+      return []
+    }
+  }
+
+  // 创建批注
+  const createAnnotation = async () => {
+    if (!id || !selectionInfo || !selectedText) return
+    
+    try {
+      const chapterTitle = chapters[selectionInfo.chapterIndex]?.title || `第${selectionInfo.chapterIndex + 1}章`
+      
+      await api.post('/api/annotations', {
+        book_id: parseInt(id),
+        chapter_index: selectionInfo.chapterIndex,
+        chapter_title: chapterTitle,
+        start_offset: selectionInfo.startOffset,
+        end_offset: selectionInfo.endOffset,
+        selected_text: selectedText,
+        note: annotationNote || null,
+        annotation_type: annotationNote ? 'note' : 'highlight',
+        color: annotationColor
+      })
+      
+      // 清除选择状态
+      setShowAnnotationPopup(false)
+      setSelectedText('')
+      setSelectionInfo(null)
+      setAnnotationNote('')
+      window.getSelection()?.removeAllRanges()
+      
+      // 重新加载批注
+      await loadAnnotations()
+    } catch (err) {
+      console.error('创建批注失败:', err)
+    }
+  }
+
+  // 更新批注
+  const updateAnnotation = async (annotationId: number, data: { note?: string; color?: string }) => {
+    try {
+      await api.put(`/api/annotations/${annotationId}`, data)
+      await loadAnnotations()
+      setEditingAnnotation(null)
+    } catch (err) {
+      console.error('更新批注失败:', err)
+    }
+  }
+
+  // 删除批注
+  const deleteAnnotation = async (annotationId: number) => {
+    try {
+      await api.delete(`/api/annotations/${annotationId}`)
+      setAnnotations(prev => prev.filter(a => a.id !== annotationId))
+    } catch (err) {
+      console.error('删除批注失败:', err)
+    }
+  }
+
+  // 导出批注
+  const exportAnnotations = async () => {
+    if (!id) return
+    try {
+      const response = await api.get(`/api/annotations/book/${id}/export`)
+      const data = response.data
+      
+      // 生成导出文本
+      let exportText = `# ${data.book_title} - 笔记导出\n\n`
+      exportText += `导出时间: ${new Date(data.exported_at).toLocaleString('zh-CN')}\n`
+      exportText += `总计: ${data.total_annotations} 条批注\n\n`
+      exportText += '---\n\n'
+      
+      let currentChapter = -1
+      for (const annotation of data.annotations) {
+        if (annotation.chapter_index !== currentChapter) {
+          currentChapter = annotation.chapter_index
+          exportText += `## ${annotation.chapter_title || `第${currentChapter + 1}章`}\n\n`
+        }
+        
+        exportText += `> ${annotation.selected_text}\n\n`
+        if (annotation.note) {
+          exportText += `📝 ${annotation.note}\n\n`
+        }
+        exportText += `*${new Date(annotation.created_at).toLocaleString('zh-CN')}*\n\n`
+        exportText += '---\n\n'
+      }
+      
+      // 下载文件
+      const blob = new Blob([exportText], { type: 'text/markdown' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${data.book_title}-笔记.md`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error('导出批注失败:', err)
+    }
+  }
+
+  // 处理文本选择
+  const handleTextSelection = useCallback(() => {
+    if (isEpub) return
+    
+    const selection = window.getSelection()
+    if (!selection || selection.isCollapsed || !selection.rangeCount) {
+      setShowAnnotationPopup(false)
+      return
+    }
+    
+    const text = selection.toString().trim()
+    if (!text) {
+      setShowAnnotationPopup(false)
+      return
+    }
+    
+    // 查找选中文本所在的章节
+    const range = selection.getRangeAt(0)
+    const startContainer = range.startContainer
+    
+    // 向上查找章节容器
+    let chapterEl: HTMLElement | null = null
+    let node: Node | null = startContainer
+    while (node) {
+      if (node instanceof HTMLElement && node.id?.startsWith('chapter-')) {
+        chapterEl = node
+        break
+      }
+      node = node.parentNode
+    }
+    
+    if (!chapterEl) {
+      setShowAnnotationPopup(false)
+      return
+    }
+    
+    const chapterIndex = parseInt(chapterEl.id.replace('chapter-', ''))
+    if (isNaN(chapterIndex)) {
+      setShowAnnotationPopup(false)
+      return
+    }
+    
+    // 获取章节内容元素
+    const chapter = loadedChapters.find(ch => ch.index === chapterIndex)
+    if (!chapter) {
+      setShowAnnotationPopup(false)
+      return
+    }
+    
+    // 计算在章节内容中的偏移（简化版：基于选中文本在章节中的位置）
+    const chapterContent = chapter.content
+    const startOffset = chapterContent.indexOf(text)
+    if (startOffset === -1) {
+      // 如果找不到完全匹配，使用选择范围的近似位置
+      setShowAnnotationPopup(false)
+      return
+    }
+    
+    const endOffset = startOffset + text.length
+    const rect = range.getBoundingClientRect()
+    
+    setSelectedText(text)
+    setSelectionInfo({
+      chapterIndex,
+      startOffset,
+      endOffset,
+      rect
+    })
+    setShowAnnotationPopup(true)
+  }, [isEpub, loadedChapters])
+
+  // 监听选择变化
+  useEffect(() => {
+    document.addEventListener('selectionchange', handleTextSelection)
+    return () => document.removeEventListener('selectionchange', handleTextSelection)
+  }, [handleTextSelection])
+
+  // 加载书籍时也加载批注
+  useEffect(() => {
+    if (id && !isEpub) {
+      loadAnnotations()
+    }
+  }, [id, isEpub])
+
+  // 跳转到批注位置
+  const goToAnnotation = (annotation: AnnotationInfo) => {
+    setAnnotationsOpen(false)
+    
+    if (annotation.chapter_index >= loadedRange.start && annotation.chapter_index <= loadedRange.end) {
+      scrollToChapter(annotation.chapter_index)
+    } else {
+      loadChapterContent(annotation.chapter_index)
+    }
+  }
+
+  // 渲染带高亮的章节内容
+  const renderChapterWithHighlights = (chapter: LoadedChapter) => {
+    const chapterAnnotations = annotations.filter(a => a.chapter_index === chapter.index)
+    
+    if (chapterAnnotations.length === 0) {
+      return chapter.content
+    }
+    
+    // 按 startOffset 排序
+    const sortedAnnotations = [...chapterAnnotations].sort((a, b) => a.start_offset - b.start_offset)
+    
+    const parts: React.ReactNode[] = []
+    let lastEnd = 0
+    
+    for (const annotation of sortedAnnotations) {
+      // 添加高亮前的普通文本
+      if (annotation.start_offset > lastEnd) {
+        parts.push(chapter.content.substring(lastEnd, annotation.start_offset))
+      }
+      
+      // 添加高亮文本
+      const highlightColor = highlightColors[annotation.color] || highlightColors.yellow
+      parts.push(
+        <Box
+          component="span"
+          key={annotation.id}
+          sx={{
+            bgcolor: highlightColor.bg,
+            borderRadius: '2px',
+            cursor: annotation.note ? 'pointer' : 'default',
+            position: 'relative',
+            '&:hover': annotation.note ? {
+              '& .annotation-note-tooltip': {
+                display: 'block'
+              }
+            } : {}
+          }}
+          title={annotation.note || undefined}
+        >
+          {chapter.content.substring(annotation.start_offset, annotation.end_offset)}
+          {annotation.note && (
+            <Box
+              component="span"
+              sx={{
+                position: 'absolute',
+                top: -2,
+                right: -6,
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                bgcolor: 'primary.main',
+              }}
+            />
+          )}
+        </Box>
+      )
+      
+      lastEnd = annotation.end_offset
+    }
+    
+    // 添加剩余文本
+    if (lastEnd < chapter.content.length) {
+      parts.push(chapter.content.substring(lastEnd))
+    }
+    
+    return parts
+  }
+
   // 书签功能
   const loadBookmarks = async () => {
     if (!id) return
@@ -1035,6 +1360,20 @@ export default function ReaderPage() {
           {!isEpub && (
             <IconButton color="inherit" onClick={(e) => { e.stopPropagation(); setSearchOpen(true) }}>
               <Search />
+            </IconButton>
+          )}
+          
+          {/* 批注按钮 (仅TXT) */}
+          {!isEpub && (
+            <IconButton 
+              color="inherit" 
+              onClick={(e) => { 
+                e.stopPropagation()
+                loadAnnotations()
+                setAnnotationsOpen(true) 
+              }}
+            >
+              <Edit />
             </IconButton>
           )}
           
@@ -1470,6 +1809,175 @@ export default function ReaderPage() {
                 支持中英文搜索
               </Typography>
             </Box>
+          )}
+        </Box>
+      </Drawer>
+
+      {/* 批注弹出菜单 */}
+      {showAnnotationPopup && selectionInfo?.rect && (
+        <Paper
+          elevation={4}
+          onClick={(e) => e.stopPropagation()}
+          sx={{
+            position: 'fixed',
+            left: Math.min(selectionInfo.rect.left + selectionInfo.rect.width / 2, window.innerWidth - 200),
+            top: selectionInfo.rect.top - 60,
+            transform: 'translateX(-50%)',
+            p: 1,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 0.5,
+            zIndex: 9999,
+            bgcolor: 'background.paper',
+            borderRadius: 2,
+          }}
+        >
+          {/* 颜色选择 */}
+          {Object.entries(highlightColors).map(([color, config]) => (
+            <IconButton
+              key={color}
+              size="small"
+              onClick={() => setAnnotationColor(color as keyof typeof highlightColors)}
+              sx={{
+                width: 28,
+                height: 28,
+                bgcolor: config.bg,
+                border: annotationColor === color ? '2px solid' : '1px solid',
+                borderColor: annotationColor === color ? 'primary.main' : 'divider',
+                '&:hover': { bgcolor: config.bg }
+              }}
+            />
+          ))}
+          <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
+          {/* 添加高亮 */}
+          <IconButton size="small" onClick={createAnnotation} title="添加高亮">
+            <FormatColorFill fontSize="small" />
+          </IconButton>
+          {/* 添加笔记 */}
+          <IconButton 
+            size="small" 
+            onClick={() => {
+              // 显示笔记输入框
+              const note = prompt('添加笔记：', '')
+              if (note !== null) {
+                setAnnotationNote(note)
+                createAnnotation()
+              }
+            }}
+            title="添加笔记"
+          >
+            <Edit fontSize="small" />
+          </IconButton>
+        </Paper>
+      )}
+
+      {/* 批注抽屉 */}
+      <Drawer anchor="right" open={annotationsOpen} onClose={() => setAnnotationsOpen(false)} onClick={(e) => e.stopPropagation()}>
+        <Box sx={{ width: 360, p: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+            <Typography variant="h6">
+              笔记与高亮 ({annotations.length})
+            </Typography>
+            <Box>
+              <IconButton size="small" onClick={exportAnnotations} title="导出笔记">
+                <Download fontSize="small" />
+              </IconButton>
+              <IconButton size="small" onClick={() => setAnnotationsOpen(false)}>
+                <Close fontSize="small" />
+              </IconButton>
+            </Box>
+          </Box>
+          
+          {loadingAnnotations ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+              <CircularProgress size={24} />
+            </Box>
+          ) : annotations.length === 0 ? (
+            <Box sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>
+              <Edit sx={{ fontSize: 48, opacity: 0.5 }} />
+              <Typography variant="body2" sx={{ mt: 1 }}>
+                暂无笔记
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                选中文本可添加高亮和笔记
+              </Typography>
+            </Box>
+          ) : (
+            <List sx={{ maxHeight: 'calc(100vh - 150px)', overflow: 'auto' }}>
+              {annotations.map((annotation) => (
+                <ListItem 
+                  key={annotation.id} 
+                  disablePadding
+                  sx={{ mb: 1 }}
+                  secondaryAction={
+                    <IconButton 
+                      edge="end" 
+                      size="small"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        deleteAnnotation(annotation.id)
+                      }}
+                    >
+                      <Delete fontSize="small" />
+                    </IconButton>
+                  }
+                >
+                  <Paper 
+                    elevation={1} 
+                    sx={{ 
+                      width: '100%', 
+                      cursor: 'pointer', 
+                      '&:hover': { bgcolor: 'action.hover' },
+                      borderLeft: 3,
+                      borderColor: highlightColors[annotation.color]?.bg || highlightColors.yellow.bg,
+                    }}
+                    onClick={() => goToAnnotation(annotation)}
+                  >
+                    <Box sx={{ p: 1.5 }}>
+                      <Typography variant="caption" color="primary" sx={{ fontWeight: 'bold' }}>
+                        {annotation.chapter_title || `第${annotation.chapter_index + 1}章`}
+                      </Typography>
+                      <Typography 
+                        variant="body2" 
+                        sx={{ 
+                          mt: 0.5, 
+                          fontSize: 13, 
+                          lineHeight: 1.5,
+                          bgcolor: highlightColors[annotation.color]?.bg || highlightColors.yellow.bg,
+                          p: 0.5,
+                          borderRadius: 0.5,
+                        }}
+                      >
+                        "{annotation.selected_text.length > 100 
+                          ? annotation.selected_text.substring(0, 100) + '...' 
+                          : annotation.selected_text}"
+                      </Typography>
+                      {annotation.note && (
+                        <Typography 
+                          variant="body2" 
+                          sx={{ 
+                            mt: 1, 
+                            fontSize: 13,
+                            color: 'text.primary',
+                            fontStyle: 'italic'
+                          }}
+                        >
+                          📝 {annotation.note}
+                        </Typography>
+                      )}
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                        {new Date(annotation.created_at).toLocaleDateString('zh-CN', {
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
+                      </Typography>
+                    </Box>
+                  </Paper>
+                </ListItem>
+              ))}
+            </List>
           )}
         </Box>
       </Drawer>

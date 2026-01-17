@@ -334,6 +334,43 @@ class Bookmark(Base):
     book = relationship("Book", backref="bookmarks")
 
 
+class Annotation(Base):
+    """阅读笔记/批注/高亮"""
+    __tablename__ = "annotations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    book_id = Column(Integer, ForeignKey("books.id"), nullable=False, index=True)
+    
+    # 位置信息
+    chapter_index = Column(Integer, nullable=False)  # 章节索引
+    chapter_title = Column(String(200), nullable=True)  # 章节标题
+    start_offset = Column(Integer, nullable=False)  # 章节内起始偏移（字符位置）
+    end_offset = Column(Integer, nullable=False)  # 章节内结束偏移
+    
+    # 内容
+    selected_text = Column(Text, nullable=False)  # 选中的原文文本
+    note = Column(Text, nullable=True)  # 用户笔记内容（可选，纯高亮则为空）
+    
+    # 类型和样式
+    annotation_type = Column(String(20), default='highlight')  # 'highlight', 'note', 'underline'
+    color = Column(String(20), default='yellow')  # 'yellow', 'green', 'blue', 'red', 'purple'
+    
+    # 元数据
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # 关系
+    user = relationship("User", backref="annotations")
+    book = relationship("Book", backref="annotations")
+
+    # 唯一约束（同一用户同一书籍同一位置只能有一个标注）
+    __table_args__ = (
+        UniqueConstraint('user_id', 'book_id', 'chapter_index', 'start_offset', 'end_offset', 
+                         name='uq_user_book_annotation_position'),
+    )
+
+
 class FilenamePattern(Base):
     """文件名解析规则"""
     __tablename__ = "filename_patterns"
