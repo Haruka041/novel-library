@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Box, Typography, Grid, FormControl, InputLabel, Select, MenuItem,
   ToggleButtonGroup, ToggleButton, CircularProgress, Alert, Chip, Menu,
@@ -43,8 +43,23 @@ const SUPPORTED_FORMATS = ['txt', 'epub', 'mobi', 'azw', 'azw3', 'pdf']
 export default function LibraryPage() {
   const { libraryId } = useParams()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { coverSize, setCoverSize, paginationMode } = useSettingsStore()
   
+  // 从 URL 参数中读取状态
+  const urlPage = parseInt(searchParams.get('page') || '1', 10)
+  const urlTags = useMemo(() => {
+    const tagStr = searchParams.get('tags')
+    if (!tagStr) return [] as number[]
+    return tagStr.split(',').map(t => parseInt(t, 10)).filter(n => !isNaN(n))
+  }, [searchParams])
+  const urlFormats = useMemo(() => {
+    const formatStr = searchParams.get('formats')
+    if (!formatStr) return [] as string[]
+    return formatStr.split(',').filter(Boolean)
+  }, [searchParams])
+  const urlSort = searchParams.get('sort') || 'added_at'
+  const urlView = searchParams.get('view') as 'grid' | 'list' || 'grid'
   
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -52,9 +67,9 @@ export default function LibraryPage() {
   const [libraries, setLibraries] = useState<LibrarySummary[]>([])
   const [books, setBooks] = useState<BookSummary[]>([])
   const [selectedLibrary, setSelectedLibrary] = useState<number | ''>('')
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
-  const [sortBy, setSortBy] = useState('added_at')
-  const [page, setPage] = useState(1)
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>(urlView)
+  const [sortBy, setSortBy] = useState(urlSort)
+  const [page, setPage] = useState(urlPage)
   const [totalPages, setTotalPages] = useState(0)
   const [hasMore, setHasMore] = useState(true)
   const [totalCount, setTotalCount] = useState(0)
@@ -65,7 +80,22 @@ export default function LibraryPage() {
   const [showFilters, setShowFilters] = useState(false)
   const [allTags, setAllTags] = useState<TagInfo[]>([])
   const [selectedTags, setSelectedTags] = useState<TagInfo[]>([])
-  const [selectedFormats, setSelectedFormats] = useState<string[]>([])
+  const [selectedFormats, setSelectedFormats] = useState<string[]>(urlFormats)
+
+  // 更新 URL 参数的辅助函数
+  const updateUrlParams = useCallback((updates: Record<string, string | number | null>) => {
+    setSearchParams(prev => {
+      const newParams = new URLSearchParams(prev)
+      for (const [key, value] of Object.entries(updates)) {
+        if (value === null || value === '' || value === undefined) {
+          newParams.delete(key)
+        } else {
+          newParams.set(key, String(value))
+        }
+      }
+      return newParams
+    }, { replace: true })
+  }, [setSearchParams])
 
   useEffect(() => {
     loadLibraries()
@@ -80,26 +110,33 @@ export default function LibraryPage() {
   // 书库变化时重新加载标签
   useEffect(() => {
     loadTags()
-    // 清除已选标签（因为新书库可能没有这些标签）
-    setSelectedTags([])
   }, [selectedLibrary])
 
+  // 当 allTags 加载完成后，根据 URL 参数设置 selectedTags
   useEffect(() => {
-    setPage(1)
+    if (allTags.length > 0 && urlTags.length > 0) {
+      const tagsFromUrl = allTags.filter(t => urlTags.includes(t.id))
+      setSelectedTags(tagsFromUrl)
+    } else if (urlTags.length === 0) {
+      setSelectedTags([])
+    }
+  }, [allTags, urlTags])
+
+  // URL 参数变化时触发加载
+  useEffect(() => {
+    setPage(urlPage)
     setHasMore(true)
     setBooks([])
-    loadBooks(1, false)
-  }, [selectedLibrary, selectedTags, selectedFormats, paginationMode])
+    loadBooks(urlPage, false)
+  }, [selectedLibrary, urlTags.join(','), urlFormats.join(','), urlPage, paginationMode])
 
   // 加载标签列表（根据选中的书库）
   const loadTags = async () => {
     try {
       let url: string
       if (selectedLibrary) {
-        // 加载指定书库的标签（带数量）
         url = `/api/tags/library/${selectedLibrary}`
       } else {
-        // 加载所有书库的标签（带数量）
         url = '/api/tags/all-libraries'
       }
       const response = await api.get<TagInfo[]>(url)
@@ -107,7 +144,6 @@ export default function LibraryPage() {
       setAllTags(tags)
     } catch (err) {
       console.error('加载标签失败:', err)
-      // 如果新API失败，回退到旧API
       try {
         const response = await api.get<TagInfo[]>('/api/tags')
         const tags = Array.isArray(response.data) ? response.data : (response.data as any).tags || []
@@ -142,12 +178,12 @@ export default function LibraryPage() {
         url += `&library_id=${selectedLibrary}`
       }
       // 添加格式筛选
-      if (selectedFormats.length > 0) {
-        url += `&formats=${selectedFormats.join(',')}`
+      if (urlFormats.length > 0) {
+        url += `&formats=${urlFormats.join(',')}`
       }
       // 添加标签筛选
-      if (selectedTags.length > 0) {
-        url += `&tag_ids=${selectedTags.map(t => t.id).join(',')}`
+      if (urlTags.length > 0) {
+        url += `&tag_ids=${urlTags.join(',')}`
       }
       
       const response = await api.get<BooksApiResponse>(url)
@@ -169,7 +205,6 @@ export default function LibraryPage() {
         setBooks(bookSummaries)
       }
       
-      // 更新总数和分页状态
       setTotalCount(response.data.total)
       setTotalPages(response.data.total_pages)
       setHasMore(pageNum < response.data.total_pages)
@@ -184,9 +219,9 @@ export default function LibraryPage() {
 
   // 传统分页：切换页码
   const handlePageChange = (newPage: number) => {
+    updateUrlParams({ page: newPage > 1 ? newPage : null })
     setPage(newPage)
     loadBooks(newPage, false)
-    // 滚动到顶部
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
@@ -199,7 +234,7 @@ export default function LibraryPage() {
     }
   }, [page, loadingMore, hasMore])
 
-  // 无限滚动观察器（仅在infinite模式下启用）
+  // 无限滚动观察器
   useEffect(() => {
     if (paginationMode !== 'infinite') return
     
@@ -221,6 +256,7 @@ export default function LibraryPage() {
 
   const handleLibraryChange = (newLibraryId: number | '') => {
     setSelectedLibrary(newLibraryId)
+    // 切换书库时清除筛选参数
     if (newLibraryId) {
       navigate(`/library/${newLibraryId}`)
     } else {
@@ -228,10 +264,48 @@ export default function LibraryPage() {
     }
   }
 
+  // 处理标签选择变化
+  const handleTagsChange = (newTags: TagInfo[]) => {
+    setSelectedTags(newTags)
+    const tagIds = newTags.map(t => t.id)
+    updateUrlParams({ 
+      tags: tagIds.length > 0 ? tagIds.join(',') : null,
+      page: null  // 重置页码
+    })
+  }
+
+  // 处理格式选择变化
+  const handleFormatsChange = (format: string) => {
+    let newFormats: string[]
+    if (selectedFormats.includes(format)) {
+      newFormats = selectedFormats.filter(f => f !== format)
+    } else {
+      newFormats = [...selectedFormats, format]
+    }
+    setSelectedFormats(newFormats)
+    updateUrlParams({
+      formats: newFormats.length > 0 ? newFormats.join(',') : null,
+      page: null
+    })
+  }
+
+  // 处理排序变化
+  const handleSortChange = (newSort: string) => {
+    setSortBy(newSort)
+    updateUrlParams({ sort: newSort !== 'added_at' ? newSort : null })
+  }
+
+  // 处理视图模式变化
+  const handleViewChange = (newView: 'grid' | 'list') => {
+    setViewMode(newView)
+    updateUrlParams({ view: newView !== 'grid' ? newView : null })
+  }
+
   // 清除所有筛选
   const clearFilters = () => {
     setSelectedTags([])
     setSelectedFormats([])
+    updateUrlParams({ tags: null, formats: null, page: null })
   }
 
   // 计算当前有多少筛选条件
@@ -264,13 +338,10 @@ export default function LibraryPage() {
 
   const currentLibrary = libraries.find((lib) => lib.id === selectedLibrary)
 
-  // 设置页面标题
   useDocumentTitle(currentLibrary?.name || '书库')
 
-  // 渲染底部分页/加载组件
   const renderPagination = () => {
     if (paginationMode === 'traditional') {
-      // 传统分页模式
       return totalPages > 0 && (
         <Pagination
           page={page}
@@ -280,7 +351,6 @@ export default function LibraryPage() {
         />
       )
     } else {
-      // 无限滚动模式
       return (
         <>
           <Box ref={observerTarget} sx={{ height: 20, mt: 4 }} />
@@ -342,7 +412,7 @@ export default function LibraryPage() {
           <Select
             value={sortBy}
             label="排序"
-            onChange={(e) => setSortBy(e.target.value)}
+            onChange={(e) => handleSortChange(e.target.value)}
           >
             <MenuItem value="added_at">最新添加</MenuItem>
             <MenuItem value="title">按标题</MenuItem>
@@ -396,7 +466,7 @@ export default function LibraryPage() {
         <ToggleButtonGroup
           value={viewMode}
           exclusive
-          onChange={(_, value) => value && setViewMode(value)}
+          onChange={(_, value) => value && handleViewChange(value)}
           size="small"
         >
           <ToggleButton value="grid">
@@ -420,13 +490,7 @@ export default function LibraryPage() {
                   <Chip
                     key={format}
                     label={format.toUpperCase()}
-                    onClick={() => {
-                      if (selectedFormats.includes(format)) {
-                        setSelectedFormats(selectedFormats.filter(f => f !== format))
-                      } else {
-                        setSelectedFormats([...selectedFormats, format])
-                      }
-                    }}
+                    onClick={() => handleFormatsChange(format)}
                     color={selectedFormats.includes(format) ? 'primary' : 'default'}
                     variant={selectedFormats.includes(format) ? 'filled' : 'outlined'}
                   />
@@ -445,7 +509,8 @@ export default function LibraryPage() {
                   : option.name
                 }
                 value={selectedTags}
-                onChange={(_, newValue) => setSelectedTags(newValue)}
+                onChange={(_, newValue) => handleTagsChange(newValue)}
+                isOptionEqualToValue={(option, value) => option.id === value.id}
                 renderInput={(params) => (
                   <TextField
                     {...params}
@@ -454,7 +519,7 @@ export default function LibraryPage() {
                   />
                 )}
                 renderOption={(props, option) => (
-                  <li {...props}>
+                  <li {...props} key={option.id}>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
                       <span>{option.name}</span>
                       {option.book_count !== undefined && (
@@ -471,6 +536,7 @@ export default function LibraryPage() {
                       label={option.name}
                       size="small"
                       {...getTagProps({ index })}
+                      key={option.id}
                     />
                   ))
                 }
@@ -527,7 +593,7 @@ export default function LibraryPage() {
             label={`格式: ${format.toUpperCase()}`}
             size="small"
             color="secondary"
-            onDelete={() => setSelectedFormats(selectedFormats.filter(f => f !== format))}
+            onDelete={() => handleFormatsChange(format)}
           />
         ))}
         {selectedTags.map(tag => (
@@ -536,7 +602,7 @@ export default function LibraryPage() {
             label={`标签: ${tag.name}`}
             size="small"
             color="secondary"
-            onDelete={() => setSelectedTags(selectedTags.filter(t => t.id !== tag.id))}
+            onDelete={() => handleTagsChange(selectedTags.filter(t => t.id !== tag.id))}
           />
         ))}
       </Box>
@@ -565,7 +631,6 @@ export default function LibraryPage() {
           )}
         </Box>
       ) : viewMode === 'grid' ? (
-        /* 网格视图 */
         <>
           <Grid container spacing={2}>
             {sortedBooks.map((book) => (
@@ -574,11 +639,9 @@ export default function LibraryPage() {
               </Grid>
             ))}
           </Grid>
-          {/* 分页组件 */}
           {renderPagination()}
         </>
       ) : (
-        /* 列表视图 */
         <>
           <Box>
             {sortedBooks.map((book) => (
@@ -596,7 +659,6 @@ export default function LibraryPage() {
                 }}
                 onClick={() => navigate(`/book/${book.id}`)}
               >
-                {/* 封面缩略图 */}
                 <Box
                   sx={{
                     width: 48,
@@ -620,7 +682,6 @@ export default function LibraryPage() {
                   )}
                 </Box>
 
-                {/* 信息 */}
                 <Box sx={{ flex: 1, minWidth: 0 }}>
                   <Typography variant="body1" fontWeight="medium" noWrap>
                     {book.title}
@@ -630,7 +691,6 @@ export default function LibraryPage() {
                   </Typography>
                 </Box>
 
-                {/* 格式标签 */}
                 {book.file_format && (
                   <Chip
                     label={book.file_format.toUpperCase()}
@@ -641,7 +701,6 @@ export default function LibraryPage() {
               </Box>
             ))}
           </Box>
-          {/* 分页组件 */}
           {renderPagination()}
         </>
       )}

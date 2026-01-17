@@ -418,17 +418,22 @@ async def list_books(
                     tag_subquery = select(BookTag.book_id).where(
                         BookTag.tag_id == tag_id_list[0]
                     ).distinct()
+                    
+                    # 执行子查询
+                    tag_book_result = await db.execute(tag_subquery)
+                    tag_book_ids = [row[0] for row in tag_book_result.fetchall()]
                 else:
                     # 多个标签：使用 group by + having count 确保必须包含所有标签
+                    # 使用 DISTINCT COUNT 确保正确计数
                     tag_subquery = select(BookTag.book_id).where(
                         BookTag.tag_id.in_(tag_id_list)
                     ).group_by(BookTag.book_id).having(
-                        func.count(BookTag.tag_id) >= len(tag_id_list)
+                        func.count(func.distinct(BookTag.tag_id)) >= len(tag_id_list)
                     )
-                
-                # 先执行子查询获取书籍ID列表
-                tag_book_result = await db.execute(tag_subquery)
-                tag_book_ids = [row[0] for row in tag_book_result]
+                    
+                    # 执行子查询
+                    tag_book_result = await db.execute(tag_subquery)
+                    tag_book_ids = [row[0] for row in tag_book_result.fetchall()]
                 
                 if tag_book_ids:
                     query = query.where(Book.id.in_(tag_book_ids))
@@ -441,8 +446,10 @@ async def list_books(
                         "limit": limit,
                         "total_pages": 0
                     }
-        except ValueError:
-            pass  # 忽略无效的标签ID
+        except ValueError as e:
+            log.error(f"标签筛选解析错误: {e}")
+        except Exception as e:
+            log.error(f"标签筛选查询错误: {e}")
     
     query = query.order_by(Book.added_at.desc())
     

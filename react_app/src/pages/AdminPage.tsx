@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useMemo, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Box, Tabs, Tab, Typography, Container } from '@mui/material'
 import { People, LibraryBooks, Backup, Image, TextFields, LocalOffer, Psychology, Code, Settings } from '@mui/icons-material'
 import SettingsTab from '../components/admin/SettingsTab'
@@ -26,8 +27,32 @@ function TabPanel(props: TabPanelProps) {
   )
 }
 
+// Tab 名称映射
+const TAB_NAMES = ['settings', 'users', 'libraries', 'tags', 'patterns', 'ai', 'backup', 'covers', 'fonts']
+
 export default function AdminPage() {
-  const [tabValue, setTabValue] = useState(0)
+  const [searchParams, setSearchParams] = useSearchParams()
+  
+  // 从 URL 读取当前 tab
+  const tabValue = useMemo(() => {
+    const tabName = searchParams.get('tab')
+    if (!tabName) return 0
+    const index = TAB_NAMES.indexOf(tabName)
+    return index >= 0 ? index : 0
+  }, [searchParams])
+
+  // 更新 tab 到 URL
+  const handleTabChange = useCallback((_: React.SyntheticEvent, newValue: number) => {
+    setSearchParams(prev => {
+      const newParams = new URLSearchParams(prev)
+      if (newValue === 0) {
+        newParams.delete('tab')  // 默认 tab 不需要在 URL 中
+      } else {
+        newParams.set('tab', TAB_NAMES[newValue])
+      }
+      return newParams
+    }, { replace: true })
+  }, [setSearchParams])
 
   return (
     <Container maxWidth="lg" sx={{ py: 3 }}>
@@ -38,7 +63,7 @@ export default function AdminPage() {
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
         <Tabs
           value={tabValue}
-          onChange={(_, v) => setTabValue(v)}
+          onChange={handleTabChange}
           variant="scrollable"
           scrollButtons="auto"
         >
