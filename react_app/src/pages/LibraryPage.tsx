@@ -2,14 +2,21 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   Box, Typography, Grid, FormControl, InputLabel, Select, MenuItem,
-  ToggleButtonGroup, ToggleButton, CircularProgress, Alert, Chip, Menu
+  ToggleButtonGroup, ToggleButton, CircularProgress, Alert, Chip, Menu,
+  Button, Collapse, Autocomplete, TextField, Stack
 } from '@mui/material'
-import { ViewModule, ViewList, PhotoSizeSelectLarge } from '@mui/icons-material'
+import { ViewModule, ViewList, PhotoSizeSelectLarge, FilterList, ExpandMore, ExpandLess } from '@mui/icons-material'
 import api from '../services/api'
 import { BookSummary, LibrarySummary } from '../types'
 import BookCard from '../components/BookCard'
 import Pagination from '../components/Pagination'
 import { useSettingsStore } from '../stores/settingsStore'
+
+interface TagInfo {
+  id: number
+  name: string
+  type: string
+}
 
 interface BookResponse {
   id: number
@@ -27,6 +34,9 @@ interface BooksApiResponse {
   limit: number
   total_pages: number
 }
+
+// 支持的格式列表
+const SUPPORTED_FORMATS = ['txt', 'epub', 'mobi', 'azw', 'azw3', 'pdf']
 
 export default function LibraryPage() {
   const { libraryId } = useParams()
@@ -47,9 +57,16 @@ export default function LibraryPage() {
   const [totalCount, setTotalCount] = useState(0)
   const [sizeMenuAnchor, setSizeMenuAnchor] = useState<null | HTMLElement>(null)
   const observerTarget = useRef<HTMLDivElement>(null)
+  
+  // 筛选器状态
+  const [showFilters, setShowFilters] = useState(false)
+  const [allTags, setAllTags] = useState<TagInfo[]>([])
+  const [selectedTags, setSelectedTags] = useState<TagInfo[]>([])
+  const [selectedFormats, setSelectedFormats] = useState<string[]>([])
 
   useEffect(() => {
     loadLibraries()
+    loadTags()
   }, [])
 
   useEffect(() => {
@@ -63,7 +80,17 @@ export default function LibraryPage() {
     setHasMore(true)
     setBooks([])
     loadBooks(1, false)
-  }, [selectedLibrary, paginationMode])
+  }, [selectedLibrary, selectedTags, selectedFormats, paginationMode])
+
+  // 加载标签列表
+  const loadTags = async () => {
+    try {
+      const response = await api.get<{ tags: TagInfo[] }>('/api/tags')
+      setAllTags(response.data.tags || [])
+    } catch (err) {
+      console.error('加载标签失败:', err)
+    }
+  }
 
   const loadLibraries = async () => {
     try {
@@ -87,6 +114,14 @@ export default function LibraryPage() {
       let url = `/api/books?page=${pageNum}&limit=${limit}`
       if (selectedLibrary) {
         url += `&library_id=${selectedLibrary}`
+      }
+      // 添加格式筛选
+      if (selectedFormats.length > 0) {
+        url += `&formats=${selectedFormats.join(',')}`
+      }
+      // 添加标签筛选
+      if (selectedTags.length > 0) {
+        url += `&tag_ids=${selectedTags.map(t => t.id).join(',')}`
       }
       
       const response = await api.get<BooksApiResponse>(url)
@@ -167,6 +202,15 @@ export default function LibraryPage() {
     }
   }
 
+  // 清除所有筛选
+  const clearFilters = () => {
+    setSelectedTags([])
+    setSelectedFormats([])
+  }
+
+  // 计算当前有多少筛选条件
+  const filterCount = selectedTags.length + selectedFormats.length
+
   // 排序书籍
   const sortedBooks = [...books].sort((a, b) => {
     switch (sortBy) {
@@ -233,6 +277,18 @@ export default function LibraryPage() {
         <Typography variant="h5" fontWeight="bold" sx={{ flexGrow: 1 }}>
           {currentLibrary?.name || '所有书籍'}
         </Typography>
+        
+        {/* 筛选按钮 */}
+        <Button
+          variant={showFilters ? 'contained' : 'outlined'}
+          size="small"
+          startIcon={<FilterList />}
+          endIcon={showFilters ? <ExpandLess /> : <ExpandMore />}
+          onClick={() => setShowFilters(!showFilters)}
+          color={filterCount > 0 ? 'primary' : 'inherit'}
+        >
+          筛选{filterCount > 0 ? ` (${filterCount})` : ''}
+        </Button>
         
         {/* 书库选择 */}
         <FormControl size="small" sx={{ minWidth: 150 }}>
@@ -323,6 +379,72 @@ export default function LibraryPage() {
         </ToggleButtonGroup>
       </Box>
 
+      {/* 筛选器面板 */}
+      <Collapse in={showFilters}>
+        <Box sx={{ mb: 3, p: 2, bgcolor: 'background.paper', borderRadius: 1, border: 1, borderColor: 'divider' }}>
+          <Stack spacing={2}>
+            {/* 格式筛选 */}
+            <Box>
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>文件格式</Typography>
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                {SUPPORTED_FORMATS.map((format) => (
+                  <Chip
+                    key={format}
+                    label={format.toUpperCase()}
+                    onClick={() => {
+                      if (selectedFormats.includes(format)) {
+                        setSelectedFormats(selectedFormats.filter(f => f !== format))
+                      } else {
+                        setSelectedFormats([...selectedFormats, format])
+                      }
+                    }}
+                    color={selectedFormats.includes(format) ? 'primary' : 'default'}
+                    variant={selectedFormats.includes(format) ? 'filled' : 'outlined'}
+                  />
+                ))}
+              </Stack>
+            </Box>
+
+            {/* 标签筛选 */}
+            <Box>
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>标签</Typography>
+              <Autocomplete
+                multiple
+                options={allTags}
+                getOptionLabel={(option) => option.name}
+                value={selectedTags}
+                onChange={(_, newValue) => setSelectedTags(newValue)}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    placeholder="选择标签..."
+                    size="small"
+                  />
+                )}
+                renderTags={(value, getTagProps) =>
+                  value.map((option, index) => (
+                    <Chip
+                      label={option.name}
+                      size="small"
+                      {...getTagProps({ index })}
+                    />
+                  ))
+                }
+              />
+            </Box>
+
+            {/* 清除筛选按钮 */}
+            {filterCount > 0 && (
+              <Box>
+                <Button size="small" onClick={clearFilters}>
+                  清除所有筛选
+                </Button>
+              </Box>
+            )}
+          </Stack>
+        </Box>
+      </Collapse>
+
       {/* 统计信息 */}
       <Box sx={{ mb: 3, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
         <Chip
@@ -354,6 +476,25 @@ export default function LibraryPage() {
             variant="outlined"
           />
         )}
+        {/* 显示当前筛选条件 */}
+        {selectedFormats.map(format => (
+          <Chip
+            key={format}
+            label={`格式: ${format.toUpperCase()}`}
+            size="small"
+            color="secondary"
+            onDelete={() => setSelectedFormats(selectedFormats.filter(f => f !== format))}
+          />
+        ))}
+        {selectedTags.map(tag => (
+          <Chip
+            key={tag.id}
+            label={`标签: ${tag.name}`}
+            size="small"
+            color="secondary"
+            onDelete={() => setSelectedTags(selectedTags.filter(t => t.id !== tag.id))}
+          />
+        ))}
       </Box>
 
       {/* 错误提示 */}
@@ -370,7 +511,14 @@ export default function LibraryPage() {
         </Box>
       ) : books.length === 0 ? (
         <Box sx={{ textAlign: 'center', py: 8 }}>
-          <Typography color="text.secondary">暂无书籍</Typography>
+          <Typography color="text.secondary">
+            {filterCount > 0 ? '没有符合筛选条件的书籍' : '暂无书籍'}
+          </Typography>
+          {filterCount > 0 && (
+            <Button sx={{ mt: 2 }} onClick={clearFilters}>
+              清除筛选条件
+            </Button>
+          )}
         </Box>
       ) : viewMode === 'grid' ? (
         /* 网格视图 */

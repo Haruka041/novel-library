@@ -294,10 +294,19 @@ async def list_books(
     limit: int = Query(50, ge=1, le=100),
     author_id: Optional[int] = None,
     library_id: Optional[int] = None,
+    formats: Optional[str] = Query(None, description="按格式筛选（逗号分隔，如'txt,epub'）"),
+    tag_ids: Optional[str] = Query(None, description="按标签筛选（逗号分隔的标签ID）"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取用户有权访问的书籍列表，返回分页数据和总数"""
+    """
+    获取用户有权访问的书籍列表，返回分页数据和总数
+    支持筛选：
+    - author_id: 按作者ID筛选
+    - library_id: 按书库ID筛选
+    - formats: 按格式筛选，多个格式用逗号分隔（如'txt,epub,mobi'）
+    - tag_ids: 按标签筛选，多个标签ID用逗号分隔（如'1,2,3'）
+    """
     # 获取用户可访问的书库ID列表
     accessible_library_ids = await get_accessible_library_ids(current_user, db)
     
@@ -332,6 +341,31 @@ async def list_books(
                 "total_pages": 0
             }
         query = query.where(Book.library_id == library_id)
+    
+    # 按格式筛选
+    if formats:
+        from app.models import BookVersion
+        format_list = [f.strip().lower() for f in formats.split(',') if f.strip()]
+        if format_list:
+            # 子查询：找到有匹配格式版本的书籍ID
+            subquery = select(BookVersion.book_id).where(
+                BookVersion.file_format.in_(format_list)
+            ).distinct()
+            query = query.where(Book.id.in_(subquery))
+    
+    # 按标签筛选
+    if tag_ids:
+        from app.models import BookTag
+        try:
+            tag_id_list = [int(t.strip()) for t in tag_ids.split(',') if t.strip()]
+            if tag_id_list:
+                # 子查询：找到有匹配标签的书籍ID
+                subquery = select(BookTag.book_id).where(
+                    BookTag.tag_id.in_(tag_id_list)
+                ).distinct()
+                query = query.where(Book.id.in_(subquery))
+        except ValueError:
+            pass  # 忽略无效的标签ID
     
     query = query.order_by(Book.added_at.desc())
     
