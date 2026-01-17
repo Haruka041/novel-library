@@ -9,7 +9,8 @@ import {
 import {
   ArrowBack, MenuBook, Download, Favorite, FavoriteBorder,
   AccessTime, Storage, PlayArrow, CheckCircle, Schedule,
-  Edit, LocalOffer, Layers, Star, StarBorder, Delete
+  Edit, LocalOffer, Layers, Star, StarBorder, Delete,
+  Link, LinkOff, Collections
 } from '@mui/icons-material'
 import api from '../services/api'
 import { useAuthStore } from '../stores/authStore'
@@ -69,6 +70,28 @@ interface EditFormData {
   content_warning: string
 }
 
+// 书籍组中的书籍信息
+interface GroupedBook {
+  id: number
+  title: string
+  author_name: string | null
+  cover_path: string | null
+  version_count: number
+  formats: string[]
+  total_size: number
+  is_primary: boolean
+  is_current: boolean
+}
+
+// 书籍组信息
+interface BookGroupInfo {
+  book_id: number
+  book_title: string
+  group_id: number | null
+  grouped_books: GroupedBook[]
+  is_grouped: boolean
+}
+
 export default function BookDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -101,6 +124,12 @@ export default function BookDetailPage() {
   // 版本管理
   const [versionDialogOpen, setVersionDialogOpen] = useState(false)
   const [settingPrimary, setSettingPrimary] = useState<number | null>(null)
+  
+  // 书籍组管理
+  const [groupDialogOpen, setGroupDialogOpen] = useState(false)
+  const [bookGroupInfo, setBookGroupInfo] = useState<BookGroupInfo | null>(null)
+  const [loadingGroup, setLoadingGroup] = useState(false)
+  const [ungrouping, setUngrouping] = useState(false)
 
   useEffect(() => {
     if (id) {
@@ -250,6 +279,64 @@ export default function BookDetailPage() {
     } finally {
       setSettingPrimary(null)
     }
+  }
+
+  // 加载书籍组信息
+  const loadBookGroupInfo = async () => {
+    try {
+      setLoadingGroup(true)
+      const response = await api.get<BookGroupInfo>(`/api/admin/books/${id}/group`)
+      setBookGroupInfo(response.data)
+    } catch (err: any) {
+      console.error('加载书籍组信息失败:', err)
+      // 如果没有组信息，设置为空
+      setBookGroupInfo(null)
+    } finally {
+      setLoadingGroup(false)
+    }
+  }
+
+  // 打开书籍组对话框
+  const handleOpenGroupDialog = async () => {
+    setGroupDialogOpen(true)
+    await loadBookGroupInfo()
+  }
+
+  // 从组中移除当前书籍
+  const handleUngroupBook = async () => {
+    if (!confirm('确定要将此书籍从组中移除吗？')) {
+      return
+    }
+    try {
+      setUngrouping(true)
+      await api.delete(`/api/admin/books/${id}/group`)
+      await loadBookGroupInfo()
+    } catch (err: any) {
+      console.error('移除书籍组失败:', err)
+      alert(err.response?.data?.detail || '移除失败')
+    } finally {
+      setUngrouping(false)
+    }
+  }
+
+  // 设置组主书籍
+  const handleSetGroupPrimary = async (bookId: number) => {
+    if (!bookGroupInfo?.group_id) return
+    try {
+      await api.put(`/api/admin/book-groups/${bookGroupInfo.group_id}/primary`, {
+        book_id: bookId
+      })
+      await loadBookGroupInfo()
+    } catch (err: any) {
+      console.error('设置主书籍失败:', err)
+      alert(err.response?.data?.detail || '设置失败')
+    }
+  }
+
+  // 跳转到组内其他书籍
+  const navigateToBook = (bookId: number) => {
+    setGroupDialogOpen(false)
+    navigate(`/book/${bookId}`)
   }
 
   if (loading) {
@@ -471,6 +558,14 @@ export default function BookDetailPage() {
                 版本 ({book.versions.length})
               </Button>
             )}
+            <Button
+              variant="outlined"
+              size="large"
+              startIcon={<Collections />}
+              onClick={handleOpenGroupDialog}
+            >
+              书籍组
+            </Button>
             <IconButton
               onClick={toggleFavorite}
               color={isFavorite ? 'error' : 'default'}
@@ -755,6 +850,176 @@ export default function BookDetailPage() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setVersionDialogOpen(false)}>关闭</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 书籍组管理对话框 */}
+      <Dialog open={groupDialogOpen} onClose={() => setGroupDialogOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Collections />
+          书籍组管理
+        </DialogTitle>
+        <DialogContent>
+          {loadingGroup ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+              <CircularProgress />
+            </Box>
+          ) : bookGroupInfo?.is_grouped ? (
+            <>
+              <Alert severity="info" sx={{ mb: 2 }}>
+                此书籍属于一个书籍组，共 {bookGroupInfo.grouped_books.length} 本书籍。
+                组内书籍代表同一本书的不同版本或来源，可以统一显示和管理。
+              </Alert>
+              
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                {bookGroupInfo.grouped_books.map((groupedBook) => (
+                  <Paper 
+                    key={groupedBook.id} 
+                    variant="outlined" 
+                    sx={{ 
+                      p: 2,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 2,
+                      bgcolor: groupedBook.is_current ? 'action.selected' : 'transparent',
+                      borderColor: groupedBook.is_primary ? 'warning.main' : groupedBook.is_current ? 'primary.main' : 'divider',
+                      borderWidth: groupedBook.is_primary || groupedBook.is_current ? 2 : 1,
+                      cursor: groupedBook.is_current ? 'default' : 'pointer',
+                      '&:hover': groupedBook.is_current ? {} : { bgcolor: 'action.hover' }
+                    }}
+                    onClick={() => !groupedBook.is_current && navigateToBook(groupedBook.id)}
+                  >
+                    {/* 封面缩略图 */}
+                    <Box
+                      sx={{
+                        width: 50,
+                        height: 70,
+                        bgcolor: 'grey.800',
+                        borderRadius: 1,
+                        overflow: 'hidden',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <Box
+                        component="img"
+                        src={`/api/books/${groupedBook.id}/cover`}
+                        alt={groupedBook.title}
+                        sx={{
+                          width: '100%',
+                          height: '100%',
+                          objectFit: 'cover',
+                        }}
+                        onError={(e: React.SyntheticEvent<HTMLImageElement>) => {
+                          e.currentTarget.style.display = 'none'
+                        }}
+                      />
+                    </Box>
+                    
+                    {/* 书籍信息 */}
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography variant="body1" fontWeight={groupedBook.is_current ? 'bold' : 'normal'} noWrap>
+                        {groupedBook.title}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" noWrap>
+                        {groupedBook.author_name || '未知作者'}
+                      </Typography>
+                      <Box sx={{ display: 'flex', gap: 1, mt: 0.5, flexWrap: 'wrap' }}>
+                        {groupedBook.formats.map((format) => (
+                          <Chip 
+                            key={format} 
+                            label={format.toUpperCase()} 
+                            size="small" 
+                            variant="outlined"
+                          />
+                        ))}
+                        <Typography variant="caption" color="text.secondary">
+                          {formatFileSize(groupedBook.total_size)}
+                        </Typography>
+                        {groupedBook.version_count > 1 && (
+                          <Typography variant="caption" color="text.secondary">
+                            • {groupedBook.version_count} 个版本
+                          </Typography>
+                        )}
+                      </Box>
+                    </Box>
+                    
+                    {/* 标记 */}
+                    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                      {groupedBook.is_primary && (
+                        <Chip 
+                          icon={<Star sx={{ fontSize: 16 }} />}
+                          label="主书籍" 
+                          size="small" 
+                          color="warning"
+                        />
+                      )}
+                      {groupedBook.is_current && (
+                        <Chip 
+                          label="当前" 
+                          size="small" 
+                          color="primary"
+                        />
+                      )}
+                    </Box>
+                    
+                    {/* 操作按钮 */}
+                    {!groupedBook.is_primary && !groupedBook.is_current && (
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={<StarBorder />}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleSetGroupPrimary(groupedBook.id)
+                        }}
+                      >
+                        设为主书籍
+                      </Button>
+                    )}
+                  </Paper>
+                ))}
+              </Box>
+              
+              <Divider sx={{ my: 2 }} />
+              
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <Button
+                  variant="outlined"
+                  color="error"
+                  startIcon={ungrouping ? <CircularProgress size={16} /> : <LinkOff />}
+                  onClick={handleUngroupBook}
+                  disabled={ungrouping}
+                >
+                  从组中移除此书籍
+                </Button>
+              </Box>
+            </>
+          ) : (
+            <Box sx={{ textAlign: 'center', py: 4 }}>
+              <Collections sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
+              <Typography variant="h6" color="text.secondary" gutterBottom>
+                此书籍尚未加入任何书籍组
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                书籍组功能用于将同一本书的不同版本或来源关联在一起。
+                您可以在管理后台的"书库管理"中使用"检测重复书籍"功能来创建书籍组。
+              </Typography>
+              <Alert severity="info" sx={{ textAlign: 'left' }}>
+                <Typography variant="body2">
+                  <strong>如何创建书籍组：</strong>
+                </Typography>
+                <Typography variant="body2" component="ol" sx={{ pl: 2, mb: 0 }}>
+                  <li>进入管理后台 → 书库管理</li>
+                  <li>选择一个书库，点击"检测重复书籍"</li>
+                  <li>系统会自动识别可能的重复书籍</li>
+                  <li>选择要合并的书籍，创建书籍组</li>
+                </Typography>
+              </Alert>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setGroupDialogOpen(false)}>关闭</Button>
         </DialogActions>
       </Dialog>
     </Box>
