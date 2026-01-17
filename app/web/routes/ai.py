@@ -647,6 +647,342 @@ async def batch_analyze_library(
     return result
 
 
+@router.post("/libraries/{library_id}/ai-extract")
+async def ai_extract_library(
+    library_id: int,
+    db: AsyncSession = Depends(get_db),
+    admin = Depends(admin_required)
+):
+    """
+    AI提取书库元数据（预览模式，不自动应用）
+    
+    使用AI分析书库中书籍的文件名，返回：
+    - 书名、作者、简介、标签
+    
+    采样数使用AI配置中的sample_size
+    """
+    if not ai_config.is_enabled():
+        raise HTTPException(400, "AI功能未启用")
+    
+    lib_result = await db.execute(select(Library).where(Library.id == library_id))
+    library = lib_result.scalar_one_or_none()
+    if not library:
+        raise HTTPException(404, "书库不存在")
+    
+    # 获取所有书籍
+    from sqlalchemy.orm import selectinload
+    versions_result = await db.execute(
+        select(BookVersion).options(
+            selectinload(BookVersion.book).selectinload(Book.author)
+        ).join(Book).where(Book.library_id == library_id)
+    )
+    versions = versions_result.scalars().all()
+    
+    if not versions:
+        return {"success": False, "error": "书库中没有书籍"}
+    
+    # 采样
+    import random
+    sample_size = ai_config.provider.sample_size or 15
+    if len(versions) > sample_size:
+        sampled_versions = random.sample(list(versions), sample_size)
+    else:
+        sampled_versions = list(versions)
+    
+    # 构建提示词，要求AI返回更多信息
+    filenames = [v.file_name for v in sampled_versions]
+    filename_list = "\n".join([f"{i+1}. {fn}" for i, fn in enumerate(filenames)])
+    
+    prompt = f"""请分析以下{len(filenames)}个小说文件名，为每个文件名提取完整元数据。
+
+文件名列表：
+{filename_list}
+
+请为每个文件名提取：
+1. 书名（title）
+2. 作者（author，无则null）
+3. 简介（description，根据书名推测生成50-100字的简介）
+4. 标签（tags，根据书名判断适合的标签，如类型、风格等，最多5个）
+
+返回JSON格式：
+{{
+    "books": [
+        {{
+            "index": 1,
+            "filename": "原文件名",
+            "title": "提取的书名",
+            "author": "作者或null",
+            "description": "生成的简介",
+            "tags": ["标签1", "标签2"]
+        }}
+    ]
+}}
+
+返回纯JSON："""
+    
+    service = get_ai_service()
+    response = await service.chat([
+        {"role": "system", "content": "你是专业的小说元数据提取助手。请根据文件名提取信息，并生成合理的简介和标签。只返回JSON格式数据。"},
+        {"role": "user", "content": prompt}
+    ])
+    
+    if not response.success:
+        return {"success": False, "error": response.error}
+    
+    try:
+        import json
+        content = response.content.strip()
+        if content.startswith('```'):
+            content = content.split('```')[1]
+            if content.startswith('json'):
+                content = content[4:]
+        
+        result = json.loads(content)
+        
+        # 将结果与书籍ID关联
+        changes = []
+        for book_info in result.get("books", []):
+            idx = book_info.get("index", 0) - 1
+            if 0 <= idx < len(sampled_versions):
+                version = sampled_versions[idx]
+                book = version.book
+                
+                changes.append({
+                    "book_id": book.id,
+                    "filename": version.file_name,
+                    "current": {
+                        "title": book.title,
+                        "author": book.author.name if book.author else None,
+                        "description": book.description
+                    },
+                    "extracted": {
+                        "title": book_info.get("title"),
+                        "author": book_info.get("author"),
+                        "description": book_info.get("description"),
+                        "tags": book_info.get("tags", [])
+                    }
+                })
+        
+        return {
+            "success": True,
+            "library_id": library_id,
+            "library_name": library.name,
+            "total_books": len(versions),
+            "sampled_count": len(sampled_versions),
+            "changes": changes
+        }
+        
+    except Exception as e:
+        return {"success": False, "error": f"解析响应失败: {str(e)}", "raw": response.content}
+
+
+@router.post("/libraries/{library_id}/ai-extract/apply")
+async def apply_ai_extract(
+    library_id: int,
+    changes: List[dict],
+    db: AsyncSession = Depends(get_db),
+    admin = Depends(admin_required)
+):
+    """应用AI提取的结果"""
+    from app.models import Tag, BookTag
+    
+    applied_count = 0
+    tags_added = 0
+    
+    for change in changes:
+        book_id = change.get("book_id")
+        extracted = change.get("extracted", {})
+        
+        book_result = await db.execute(select(Book).where(Book.id == book_id))
+        book = book_result.scalar_one_or_none()
+        if not book:
+            continue
+        
+        # 更新书名
+        if extracted.get("title"):
+            book.title = extracted["title"].strip()
+        
+        # 更新作者
+        if extracted.get("author"):
+            author_name = extracted["author"].strip()
+            author_result = await db.execute(select(Author).where(Author.name == author_name))
+            author = author_result.scalar_one_or_none()
+            if not author:
+                author = Author(name=author_name)
+                db.add(author)
+                await db.flush()
+            book.author_id = author.id
+        
+        # 更新简介
+        if extracted.get("description"):
+            book.description = extracted["description"].strip()
+        
+        # 添加标签
+        for tag_name in extracted.get("tags", []):
+            tag_result = await db.execute(select(Tag).where(Tag.name == tag_name))
+            tag = tag_result.scalar_one_or_none()
+            if tag:
+                # 检查是否已有此标签
+                existing = await db.execute(
+                    select(BookTag).where(BookTag.book_id == book_id, BookTag.tag_id == tag.id)
+                )
+                if not existing.scalar_one_or_none():
+                    db.add(BookTag(book_id=book_id, tag_id=tag.id))
+                    tags_added += 1
+        
+        applied_count += 1
+    
+    await db.commit()
+    
+    return {
+        "success": True,
+        "applied_count": applied_count,
+        "tags_added": tags_added
+    }
+
+
+@router.post("/libraries/{library_id}/pattern-extract")
+async def pattern_extract_library(
+    library_id: int,
+    db: AsyncSession = Depends(get_db),
+    admin = Depends(admin_required)
+):
+    """
+    使用现有规则提取书库元数据（预览模式，不自动应用）
+    
+    按规则优先级依次匹配每本书的文件名
+    """
+    from sqlalchemy import or_
+    from sqlalchemy.orm import selectinload
+    
+    lib_result = await db.execute(select(Library).where(Library.id == library_id))
+    library = lib_result.scalar_one_or_none()
+    if not library:
+        raise HTTPException(404, "书库不存在")
+    
+    # 获取规则
+    patterns_result = await db.execute(
+        select(FilenamePattern).where(
+            FilenamePattern.is_active == True,
+            or_(FilenamePattern.library_id == library_id, FilenamePattern.library_id == None)
+        ).order_by(FilenamePattern.priority.desc())
+    )
+    patterns = patterns_result.scalars().all()
+    
+    if not patterns:
+        return {"success": False, "error": "没有可用规则，请先在'文件名规则'中添加规则"}
+    
+    # 编译正则
+    compiled_patterns = []
+    for p in patterns:
+        try:
+            compiled_patterns.append({
+                "pattern": p,
+                "compiled": re.compile(p.regex_pattern)
+            })
+        except:
+            pass
+    
+    # 获取所有书籍
+    versions_result = await db.execute(
+        select(BookVersion).options(
+            selectinload(BookVersion.book).selectinload(Book.author)
+        ).join(Book).where(Book.library_id == library_id)
+    )
+    versions = versions_result.scalars().all()
+    
+    if not versions:
+        return {"success": False, "error": "书库中没有书籍"}
+    
+    changes = []
+    matched_count = 0
+    
+    for version in versions:
+        filename = version.file_name
+        book = version.book
+        
+        for cp in compiled_patterns:
+            match = cp["compiled"].match(filename)
+            if match:
+                groups = match.groups()
+                p = cp["pattern"]
+                
+                extracted_title = groups[p.title_group - 1] if p.title_group > 0 and p.title_group <= len(groups) else None
+                extracted_author = groups[p.author_group - 1] if p.author_group > 0 and p.author_group <= len(groups) else None
+                
+                if extracted_title:
+                    changes.append({
+                        "book_id": book.id,
+                        "filename": filename,
+                        "pattern_name": p.name,
+                        "current": {
+                            "title": book.title,
+                            "author": book.author.name if book.author else None
+                        },
+                        "extracted": {
+                            "title": extracted_title.strip() if extracted_title else None,
+                            "author": extracted_author.strip() if extracted_author else None
+                        }
+                    })
+                    matched_count += 1
+                
+                break
+    
+    return {
+        "success": True,
+        "library_id": library_id,
+        "library_name": library.name,
+        "total_books": len(versions),
+        "matched_count": matched_count,
+        "patterns_used": len(compiled_patterns),
+        "changes": changes
+    }
+
+
+@router.post("/libraries/{library_id}/pattern-extract/apply")
+async def apply_pattern_extract(
+    library_id: int,
+    changes: List[dict],
+    db: AsyncSession = Depends(get_db),
+    admin = Depends(admin_required)
+):
+    """应用规则提取的结果"""
+    applied_count = 0
+    
+    for change in changes:
+        book_id = change.get("book_id")
+        extracted = change.get("extracted", {})
+        
+        book_result = await db.execute(select(Book).where(Book.id == book_id))
+        book = book_result.scalar_one_or_none()
+        if not book:
+            continue
+        
+        # 更新书名
+        if extracted.get("title"):
+            book.title = extracted["title"].strip()
+        
+        # 更新作者
+        if extracted.get("author"):
+            author_name = extracted["author"].strip()
+            author_result = await db.execute(select(Author).where(Author.name == author_name))
+            author = author_result.scalar_one_or_none()
+            if not author:
+                author = Author(name=author_name)
+                db.add(author)
+                await db.flush()
+            book.author_id = author.id
+        
+        applied_count += 1
+    
+    await db.commit()
+    
+    return {
+        "success": True,
+        "applied_count": applied_count
+    }
+
+
 @router.post("/patterns/batch-apply")
 async def batch_apply_patterns(
     library_id: int,

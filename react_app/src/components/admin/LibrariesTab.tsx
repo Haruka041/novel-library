@@ -10,7 +10,8 @@ import {
 import {
   Add, Edit, Delete, Refresh, FolderOpen, ExpandMore, ExpandLess,
   PlayArrow, Stop, CheckCircle, Error as ErrorIcon, Schedule,
-  Folder, DeleteOutline, AddCircle, LocalOffer, Sync, Warning
+  Folder, DeleteOutline, AddCircle, LocalOffer, Sync, Warning,
+  Psychology, Code, Preview
 } from '@mui/icons-material'
 import api from '../../services/api'
 
@@ -53,6 +54,35 @@ interface TagInfo {
   description?: string
 }
 
+interface ExtractChange {
+  book_id: number
+  filename: string
+  pattern_name?: string
+  current: {
+    title: string
+    author: string | null
+    description?: string
+  }
+  extracted: {
+    title: string | null
+    author: string | null
+    description?: string
+    tags?: string[]
+  }
+}
+
+interface ExtractResult {
+  success: boolean
+  error?: string
+  library_id: number
+  library_name: string
+  total_books: number
+  sampled_count?: number
+  matched_count?: number
+  patterns_used?: number
+  changes: ExtractChange[]
+}
+
 export default function LibrariesTab() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -87,6 +117,14 @@ export default function LibrariesTab() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [dialogType, setDialogType] = useState<'create' | 'edit'>('create')
   const [selectedLibrary, setSelectedLibrary] = useState<Library | null>(null)
+  
+  // AI/规则提取
+  const [extractDialogOpen, setExtractDialogOpen] = useState(false)
+  const [extractType, setExtractType] = useState<'ai' | 'pattern'>('ai')
+  const [extractLoading, setExtractLoading] = useState(false)
+  const [extractResult, setExtractResult] = useState<ExtractResult | null>(null)
+  const [selectedChanges, setSelectedChanges] = useState<Set<number>>(new Set())
+  const [applyingExtract, setApplyingExtract] = useState(false)
   
   // 表单数据
   const [formData, setFormData] = useState({
@@ -135,6 +173,107 @@ export default function LibrariesTab() {
     } catch (err: any) {
       console.error('更新内容分级失败:', err)
       setError(err.response?.data?.detail || '更新内容分级失败')
+    }
+  }
+
+  // AI提取
+  const handleAIExtract = async (libraryId: number) => {
+    setExtractType('ai')
+    setExtractLoading(true)
+    setExtractResult(null)
+    setSelectedChanges(new Set())
+    setExtractDialogOpen(true)
+    
+    try {
+      const response = await api.post(`/api/admin/ai/libraries/${libraryId}/ai-extract`)
+      if (response.data.success) {
+        setExtractResult(response.data)
+        // 默认全选
+        setSelectedChanges(new Set(response.data.changes.map((c: ExtractChange) => c.book_id)))
+      } else {
+        setError(response.data.error || 'AI提取失败')
+        setExtractDialogOpen(false)
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'AI提取失败')
+      setExtractDialogOpen(false)
+    } finally {
+      setExtractLoading(false)
+    }
+  }
+  
+  // 规则提取
+  const handlePatternExtract = async (libraryId: number) => {
+    setExtractType('pattern')
+    setExtractLoading(true)
+    setExtractResult(null)
+    setSelectedChanges(new Set())
+    setExtractDialogOpen(true)
+    
+    try {
+      const response = await api.post(`/api/admin/ai/libraries/${libraryId}/pattern-extract`)
+      if (response.data.success) {
+        setExtractResult(response.data)
+        // 默认全选
+        setSelectedChanges(new Set(response.data.changes.map((c: ExtractChange) => c.book_id)))
+      } else {
+        setError(response.data.error || '规则提取失败')
+        setExtractDialogOpen(false)
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.detail || '规则提取失败')
+      setExtractDialogOpen(false)
+    } finally {
+      setExtractLoading(false)
+    }
+  }
+  
+  // 应用提取结果
+  const handleApplyExtract = async () => {
+    if (!extractResult) return
+    
+    const changesToApply = extractResult.changes.filter(c => selectedChanges.has(c.book_id))
+    if (changesToApply.length === 0) {
+      alert('请至少选择一项变更')
+      return
+    }
+    
+    setApplyingExtract(true)
+    try {
+      const endpoint = extractType === 'ai' 
+        ? `/api/admin/ai/libraries/${extractResult.library_id}/ai-extract/apply`
+        : `/api/admin/ai/libraries/${extractResult.library_id}/pattern-extract/apply`
+      
+      const response = await api.post(endpoint, { changes: changesToApply })
+      
+      alert(`应用成功！\n已更新 ${response.data.applied_count} 本书${response.data.tags_added ? `\n添加标签 ${response.data.tags_added} 个` : ''}`)
+      setExtractDialogOpen(false)
+      loadLibraries()
+    } catch (err: any) {
+      setError(err.response?.data?.detail || '应用失败')
+    } finally {
+      setApplyingExtract(false)
+    }
+  }
+  
+  const toggleChangeSelection = (bookId: number) => {
+    setSelectedChanges(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(bookId)) {
+        newSet.delete(bookId)
+      } else {
+        newSet.add(bookId)
+      }
+      return newSet
+    })
+  }
+  
+  const toggleAllChanges = () => {
+    if (!extractResult) return
+    if (selectedChanges.size === extractResult.changes.length) {
+      setSelectedChanges(new Set())
+    } else {
+      setSelectedChanges(new Set(extractResult.changes.map(c => c.book_id)))
     }
   }
 
@@ -551,6 +690,22 @@ export default function LibrariesTab() {
                       >
                         <PlayArrow />
                       </IconButton>
+                      <IconButton
+                        size="small"
+                        onClick={() => handleAIExtract(library.id)}
+                        title="AI提取元数据"
+                        color="secondary"
+                      >
+                        <Psychology />
+                      </IconButton>
+                      <IconButton
+                        size="small"
+                        onClick={() => handlePatternExtract(library.id)}
+                        title="规则提取元数据"
+                        color="info"
+                      >
+                        <Code />
+                      </IconButton>
                       <IconButton size="small" onClick={() => handleEdit(library)} title="编辑">
                         <Edit />
                       </IconButton>
@@ -916,6 +1071,165 @@ export default function LibrariesTab() {
         <DialogActions>
           <Button onClick={() => setPathDialogOpen(false)}>取消</Button>
           <Button variant="contained" onClick={handleSubmitPath}>添加</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* AI/规则提取预览对话框 */}
+      <Dialog 
+        open={extractDialogOpen} 
+        onClose={() => !extractLoading && !applyingExtract && setExtractDialogOpen(false)} 
+        maxWidth="lg" 
+        fullWidth
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          {extractType === 'ai' ? <Psychology /> : <Code />}
+          {extractType === 'ai' ? 'AI提取预览' : '规则提取预览'}
+          {extractResult && (
+            <Chip 
+              label={`${extractResult.library_name}`} 
+              size="small" 
+              color="primary" 
+              sx={{ ml: 1 }}
+            />
+          )}
+        </DialogTitle>
+        <DialogContent>
+          {extractLoading ? (
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 4 }}>
+              <CircularProgress size={48} />
+              <Typography sx={{ mt: 2 }}>
+                {extractType === 'ai' ? '正在使用AI分析文件名...' : '正在使用规则匹配文件名...'}
+              </Typography>
+            </Box>
+          ) : extractResult ? (
+            <>
+              <Box sx={{ mb: 2, display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                <Chip label={`总书籍: ${extractResult.total_books}`} variant="outlined" />
+                {extractType === 'ai' && extractResult.sampled_count && (
+                  <Chip label={`采样数: ${extractResult.sampled_count}`} variant="outlined" color="info" />
+                )}
+                {extractType === 'pattern' && extractResult.matched_count !== undefined && (
+                  <Chip label={`匹配: ${extractResult.matched_count}`} variant="outlined" color="success" />
+                )}
+                <Chip label={`待变更: ${extractResult.changes.length}`} variant="outlined" color="warning" />
+                <Chip label={`已选择: ${selectedChanges.size}`} variant="outlined" color="primary" />
+              </Box>
+              
+              {extractResult.changes.length === 0 ? (
+                <Alert severity="info">没有需要变更的内容</Alert>
+              ) : (
+                <>
+                  <Box sx={{ mb: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Button size="small" onClick={toggleAllChanges}>
+                      {selectedChanges.size === extractResult.changes.length ? '取消全选' : '全选'}
+                    </Button>
+                  </Box>
+                  
+                  <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 400 }}>
+                    <Table size="small" stickyHeader>
+                      <TableHead>
+                        <TableRow>
+                          <TableCell padding="checkbox">选择</TableCell>
+                          <TableCell>文件名</TableCell>
+                          {extractType === 'pattern' && <TableCell>匹配规则</TableCell>}
+                          <TableCell>当前书名</TableCell>
+                          <TableCell>→</TableCell>
+                          <TableCell>提取书名</TableCell>
+                          <TableCell>当前作者</TableCell>
+                          <TableCell>→</TableCell>
+                          <TableCell>提取作者</TableCell>
+                          {extractType === 'ai' && <TableCell>标签</TableCell>}
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {extractResult.changes.map((change) => (
+                          <TableRow 
+                            key={change.book_id}
+                            sx={{ 
+                              bgcolor: selectedChanges.has(change.book_id) ? 'action.selected' : 'inherit',
+                              cursor: 'pointer'
+                            }}
+                            onClick={() => toggleChangeSelection(change.book_id)}
+                          >
+                            <TableCell padding="checkbox">
+                              <input
+                                type="checkbox"
+                                checked={selectedChanges.has(change.book_id)}
+                                onChange={() => toggleChangeSelection(change.book_id)}
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                            </TableCell>
+                            <TableCell sx={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {change.filename}
+                            </TableCell>
+                            {extractType === 'pattern' && (
+                              <TableCell>
+                                <Chip label={change.pattern_name} size="small" />
+                              </TableCell>
+                            )}
+                            <TableCell sx={{ color: 'text.secondary' }}>
+                              {change.current.title}
+                            </TableCell>
+                            <TableCell>→</TableCell>
+                            <TableCell sx={{ 
+                              fontWeight: change.extracted.title !== change.current.title ? 'bold' : 'normal',
+                              color: change.extracted.title !== change.current.title ? 'success.main' : 'inherit'
+                            }}>
+                              {change.extracted.title || '-'}
+                            </TableCell>
+                            <TableCell sx={{ color: 'text.secondary' }}>
+                              {change.current.author || '-'}
+                            </TableCell>
+                            <TableCell>→</TableCell>
+                            <TableCell sx={{ 
+                              fontWeight: change.extracted.author !== change.current.author ? 'bold' : 'normal',
+                              color: change.extracted.author !== change.current.author ? 'success.main' : 'inherit'
+                            }}>
+                              {change.extracted.author || '-'}
+                            </TableCell>
+                            {extractType === 'ai' && (
+                              <TableCell>
+                                <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                                  {change.extracted.tags?.slice(0, 3).map((tag, i) => (
+                                    <Chip key={i} label={tag} size="small" variant="outlined" />
+                                  ))}
+                                  {(change.extracted.tags?.length || 0) > 3 && (
+                                    <Chip label={`+${change.extracted.tags!.length - 3}`} size="small" />
+                                  )}
+                                </Box>
+                              </TableCell>
+                            )}
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                  
+                  {extractType === 'ai' && (
+                    <Alert severity="info" sx={{ mt: 2 }}>
+                      AI提取还会更新简介并添加标签。只有系统中已存在的标签才会被添加。
+                    </Alert>
+                  )}
+                </>
+              )}
+            </>
+          ) : null}
+        </DialogContent>
+        <DialogActions>
+          <Button 
+            onClick={() => setExtractDialogOpen(false)} 
+            disabled={extractLoading || applyingExtract}
+          >
+            取消
+          </Button>
+          <Button 
+            variant="contained" 
+            onClick={handleApplyExtract}
+            disabled={extractLoading || applyingExtract || !extractResult || selectedChanges.size === 0}
+            startIcon={applyingExtract ? <CircularProgress size={20} /> : <CheckCircle />}
+          >
+            {applyingExtract ? '应用中...' : `应用选中的 ${selectedChanges.size} 项变更`}
+          </Button>
         </DialogActions>
       </Dialog>
     </Box>
