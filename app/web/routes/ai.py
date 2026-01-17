@@ -30,6 +30,7 @@ class ProviderUpdate(BaseModel):
     max_tokens: Optional[int] = None
     temperature: Optional[float] = None
     timeout: Optional[int] = None
+    sample_size: Optional[int] = None  # AI分析采样数
     enabled: Optional[bool] = None
 
 
