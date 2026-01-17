@@ -841,6 +841,21 @@ async def apply_ai_extract(
     }
 
 
+# 辅助函数：去除文件扩展名
+def _remove_file_extension(text: str) -> str:
+    """去除字符串中的常见文件扩展名"""
+    if not text:
+        return text
+    # 常见扩展名列表
+    extensions = ['.txt', '.epub', '.mobi', '.azw3', '.azw', '.pdf', '.TXT', '.EPUB', '.MOBI']
+    result = text.strip()
+    for ext in extensions:
+        if result.endswith(ext):
+            result = result[:-len(ext)]
+            break
+    return result.strip()
+
+
 @router.post("/libraries/{library_id}/pattern-extract")
 async def pattern_extract_library(
     library_id: int,
@@ -912,6 +927,12 @@ async def pattern_extract_library(
                 
                 extracted_title = groups[p.title_group - 1] if p.title_group > 0 and p.title_group <= len(groups) else None
                 extracted_author = groups[p.author_group - 1] if p.author_group > 0 and p.author_group <= len(groups) else None
+                
+                # 自动去除文件扩展名
+                if extracted_title:
+                    extracted_title = _remove_file_extension(extracted_title)
+                if extracted_author:
+                    extracted_author = _remove_file_extension(extracted_author)
                 
                 if extracted_title:
                     matched_count += 1
@@ -1065,6 +1086,12 @@ async def apply_all_pattern_extract(
                 
                 extracted_title = groups[p.title_group - 1] if p.title_group > 0 and p.title_group <= len(groups) else None
                 extracted_author = groups[p.author_group - 1] if p.author_group > 0 and p.author_group <= len(groups) else None
+                
+                # 自动去除文件扩展名
+                if extracted_title:
+                    extracted_title = _remove_file_extension(extracted_title)
+                if extracted_author:
+                    extracted_author = _remove_file_extension(extracted_author)
                 
                 if extracted_title:
                     matched_count += 1

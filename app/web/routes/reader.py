@@ -514,6 +514,113 @@ async def download_book(
     )
 
 
+@router.get("/books/{book_id}/search")
+async def search_in_book(
+    keyword: str = Query(..., min_length=1, max_length=100, description="搜索关键词"),
+    page: int = Query(0, ge=0, description="结果页码"),
+    page_size: int = Query(20, ge=1, le=100, description="每页结果数"),
+    book: Book = Depends(get_accessible_book),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    在书籍内容中搜索关键词
+    
+    返回:
+    - matches: 匹配结果列表，包含上下文、章节信息和位置
+    - total: 总匹配数
+    - page: 当前页
+    - totalPages: 总页数
+    """
+    import re
+    
+    await db.refresh(book, ['versions'])
+    
+    primary_version = None
+    if book.versions:
+        primary_version = next((v for v in book.versions if v.is_primary), None)
+        if not primary_version:
+            primary_version = book.versions[0] if book.versions else None
+    
+    if not primary_version:
+        raise HTTPException(status_code=404, detail="书籍没有可用的文件版本")
+    
+    file_path = Path(primary_version.file_path)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="文件不存在")
+    
+    file_format = primary_version.file_format.lower()
+    
+    if file_format not in ['txt', '.txt']:
+        raise HTTPException(status_code=400, detail="书内搜索仅支持TXT格式")
+    
+    # 读取文件内容
+    content = await _read_txt_file(file_path)
+    if content is None:
+        raise HTTPException(status_code=500, detail="无法解码文件内容")
+    
+    # 解析章节
+    all_chapters = _parse_chapters(content)
+    
+    # 搜索关键词（不区分大小写）
+    matches = []
+    keyword_lower = keyword.lower()
+    context_chars = 50  # 上下文字符数
+    
+    # 使用正则搜索，支持中文
+    pattern = re.compile(re.escape(keyword), re.IGNORECASE)
+    
+    for match in pattern.finditer(content):
+        start_pos = match.start()
+        end_pos = match.end()
+        
+        # 找出该位置所属的章节
+        chapter_index = 0
+        chapter_title = "未知章节"
+        chapter_start_offset = 0
+        
+        for i, ch in enumerate(all_chapters):
+            if ch["startOffset"] <= start_pos < ch["endOffset"]:
+                chapter_index = i
+                chapter_title = ch["title"]
+                chapter_start_offset = ch["startOffset"]
+                break
+        
+        # 提取上下文
+        context_start = max(0, start_pos - context_chars)
+        context_end = min(len(content), end_pos + context_chars)
+        context_text = content[context_start:context_end]
+        
+        # 计算关键词在上下文中的位置
+        highlight_start = start_pos - context_start
+        highlight_end = end_pos - context_start
+        
+        matches.append({
+            "chapterIndex": chapter_index,
+            "chapterTitle": chapter_title,
+            "position": start_pos,
+            "positionInChapter": start_pos - chapter_start_offset,
+            "context": context_text,
+            "highlightStart": highlight_start,
+            "highlightEnd": highlight_end,
+        })
+    
+    # 分页
+    total = len(matches)
+    total_pages = (total + page_size - 1) // page_size if total > 0 else 0
+    start_idx = page * page_size
+    end_idx = min(start_idx + page_size, total)
+    
+    return {
+        "keyword": keyword,
+        "matches": matches[start_idx:end_idx],
+        "total": total,
+        "page": page,
+        "pageSize": page_size,
+        "totalPages": total_pages
+    }
+
+
 @router.get("/books/{book_id}/cover")
 async def get_book_cover(
     book_id: int,

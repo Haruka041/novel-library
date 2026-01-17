@@ -1911,6 +1911,363 @@ async def auto_tag_books(
         raise HTTPException(status_code=500, detail=f"自动打标签失败: {str(e)}")
 
 
+# ==================== 书籍组（Emby风格合并）API ====================
+
+class MergeGroup(BaseModel):
+    """合并分组"""
+    keep_id: int  # 要保留的书籍ID (主书籍)
+    merge_ids: List[int]  # 要合并的书籍ID列表
+
+
+class MergeDuplicatesRequest(BaseModel):
+    """合并重复书籍请求"""
+    merge_groups: List[MergeGroup]
+
+
+class GroupBooksRequest(BaseModel):
+    """创建书籍组请求"""
+    primary_book_id: int  # 主书籍ID
+    book_ids: List[int]  # 所有要加入组的书籍ID
+    group_name: Optional[str] = None  # 组名称（可选）
+
+
+class SetGroupPrimaryRequest(BaseModel):
+    """设置组主书籍请求"""
+    primary_book_id: int
+
+
+@router.get("/admin/libraries/{library_id}/detect-duplicates")
+async def detect_library_duplicates(
+    library_id: int,
+    current_user: User = Depends(admin_required),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    检测书库中的重复书籍（管理员）
+    
+    基于书名+作者相似度匹配，返回重复书籍分组列表
+    每个分组包含建议保留的主版本
+    """
+    from app.core.deduplicator import Deduplicator
+    
+    # 验证书库存在
+    result = await db.execute(
+        select(Library).where(Library.id == library_id)
+    )
+    library = result.scalar_one_or_none()
+    
+    if not library:
+        raise HTTPException(status_code=404, detail="书库不存在")
+    
+    # 检测重复
+    deduplicator = Deduplicator(db)
+    duplicate_groups = await deduplicator.detect_duplicates_in_library(library_id)
+    
+    log.info(
+        f"管理员 {current_user.username} 检测书库 {library.name} 的重复书籍, "
+        f"发现 {len(duplicate_groups)} 组重复"
+    )
+    
+    return {
+        "library_id": library_id,
+        "library_name": library.name,
+        "duplicate_group_count": len(duplicate_groups),
+        "duplicate_groups": duplicate_groups,
+    }
+
+
+@router.post("/admin/libraries/{library_id}/merge-duplicates")
+async def merge_library_duplicates(
+    library_id: int,
+    request: MergeDuplicatesRequest,
+    current_user: User = Depends(admin_required),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    合并书库中的重复书籍（管理员）
+    
+    将多个重复书籍的版本合并到一本书中
+    
+    参数：
+    - merge_groups: 合并分组列表
+      - keep_id: 要保留的书籍ID
+      - merge_ids: 要合并（删除）的书籍ID列表
+    
+    注意：合并后，被合并的书籍记录会被删除，其版本会转移到保留的书籍
+    """
+    from app.core.deduplicator import Deduplicator
+    
+    # 验证书库存在
+    result = await db.execute(
+        select(Library).where(Library.id == library_id)
+    )
+    library = result.scalar_one_or_none()
+    
+    if not library:
+        raise HTTPException(status_code=404, detail="书库不存在")
+    
+    if not request.merge_groups:
+        return {
+            "message": "没有需要合并的书籍",
+            "merged_count": 0,
+        }
+    
+    # 执行合并
+    deduplicator = Deduplicator(db)
+    
+    total_merged = 0
+    total_skipped = 0
+    results = []
+    
+    for group in request.merge_groups:
+        try:
+            result = await deduplicator.merge_books(
+                keep_book_id=group.keep_id,
+                merge_book_ids=group.merge_ids
+            )
+            
+            if result["status"] == "success":
+                total_merged += result["merged_version_count"]
+                total_skipped += result["skipped_duplicate_count"]
+                results.append({
+                    "keep_id": group.keep_id,
+                    "status": "success",
+                    "merged_versions": result["merged_version_count"],
+                    "skipped_duplicates": result["skipped_duplicate_count"],
+                })
+            else:
+                results.append({
+                    "keep_id": group.keep_id,
+                    "status": "error",
+                    "message": result.get("message", "未知错误"),
+                })
+        except Exception as e:
+            log.error(f"合并书籍 {group.keep_id} 失败: {e}")
+            results.append({
+                "keep_id": group.keep_id,
+                "status": "error",
+                "message": str(e),
+            })
+    
+    log.info(
+        f"管理员 {current_user.username} 合并书库 {library.name} 的重复书籍, "
+        f"合并 {len(request.merge_groups)} 组, "
+        f"转移 {total_merged} 个版本, 跳过 {total_skipped} 个重复"
+    )
+    
+    return {
+        "library_id": library_id,
+        "library_name": library.name,
+        "merge_group_count": len(request.merge_groups),
+        "total_merged_versions": total_merged,
+        "total_skipped_duplicates": total_skipped,
+        "results": results,
+    }
+
+
+@router.post("/admin/libraries/{library_id}/auto-merge-duplicates")
+async def auto_merge_library_duplicates(
+    library_id: int,
+    current_user: User = Depends(admin_required),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    自动检测并合并书库中的所有重复书籍（管理员）
+    
+    一键操作：自动检测重复 → 使用建议的主版本 → 执行合并
+    
+    警告：此操作不可撤销！建议先使用 detect-duplicates 预览
+    """
+    from app.core.deduplicator import Deduplicator
+    
+    # 验证书库存在
+    result = await db.execute(
+        select(Library).where(Library.id == library_id)
+    )
+    library = result.scalar_one_or_none()
+    
+    if not library:
+        raise HTTPException(status_code=404, detail="书库不存在")
+    
+    # 检测重复
+    deduplicator = Deduplicator(db)
+    duplicate_groups = await deduplicator.detect_duplicates_in_library(library_id)
+    
+    if not duplicate_groups:
+        return {
+            "message": "没有发现重复书籍",
+            "library_id": library_id,
+            "library_name": library.name,
+            "merged_count": 0,
+        }
+    
+    # 自动合并
+    total_merged = 0
+    total_skipped = 0
+    merged_groups = 0
+    
+    for group in duplicate_groups:
+        keep_id = group["suggested_primary_id"]
+        merge_ids = [b["id"] for b in group["books"] if b["id"] != keep_id]
+        
+        if merge_ids:
+            try:
+                result = await deduplicator.merge_books(
+                    keep_book_id=keep_id,
+                    merge_book_ids=merge_ids
+                )
+                
+                if result["status"] == "success":
+                    total_merged += result["merged_version_count"]
+                    total_skipped += result["skipped_duplicate_count"]
+                    merged_groups += 1
+            except Exception as e:
+                log.error(f"自动合并书籍 {keep_id} 失败: {e}")
+    
+    log.info(
+        f"管理员 {current_user.username} 自动合并书库 {library.name} 的重复书籍, "
+        f"合并 {merged_groups}/{len(duplicate_groups)} 组, "
+        f"转移 {total_merged} 个版本, 跳过 {total_skipped} 个重复"
+    )
+    
+    return {
+        "library_id": library_id,
+        "library_name": library.name,
+        "detected_groups": len(duplicate_groups),
+        "merged_groups": merged_groups,
+        "total_merged_versions": total_merged,
+        "total_skipped_duplicates": total_skipped,
+    }
+
+
+@router.post("/admin/book-groups")
+async def create_book_group(
+    request: GroupBooksRequest,
+    current_user: User = Depends(admin_required),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    创建书籍组（管理员）
+    
+    将多本书籍组合在一起（类似Emby的版本合并，但不删除书籍）
+    同组书籍在前端可以展示为一个条目，点击后选择具体版本
+    
+    参数：
+    - primary_book_id: 主书籍ID（用于显示封面、标题等）
+    - book_ids: 所有要加入组的书籍ID列表
+    - group_name: 可选，组名称
+    """
+    from app.core.deduplicator import Deduplicator
+    
+    deduplicator = Deduplicator(db)
+    result = await deduplicator.group_books(
+        primary_book_id=request.primary_book_id,
+        book_ids=request.book_ids,
+        group_name=request.group_name
+    )
+    
+    if result["status"] == "error":
+        raise HTTPException(status_code=400, detail=result["message"])
+    
+    log.info(
+        f"管理员 {current_user.username} 创建书籍组: {result['group_name']}, "
+        f"共 {result['book_count']} 本书"
+    )
+    
+    return result
+
+
+@router.get("/admin/books/{book_id}/group")
+async def get_book_group(
+    book_id: int,
+    current_user: User = Depends(admin_required),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    获取书籍的同组书籍（管理员）
+    
+    返回与指定书籍同组的所有书籍列表
+    """
+    from app.core.deduplicator import Deduplicator
+    
+    deduplicator = Deduplicator(db)
+    grouped_books = await deduplicator.get_grouped_books(book_id)
+    
+    # 获取书籍信息用于返回
+    result = await db.execute(
+        select(Book).where(Book.id == book_id)
+    )
+    book = result.scalar_one_or_none()
+    
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    
+    return {
+        "book_id": book_id,
+        "book_title": book.title,
+        "group_id": book.group_id,
+        "grouped_books": grouped_books,
+        "is_grouped": len(grouped_books) > 0,
+    }
+
+
+@router.delete("/admin/books/{book_id}/group")
+async def remove_book_from_group(
+    book_id: int,
+    current_user: User = Depends(admin_required),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    将书籍从组中移除（管理员）
+    
+    不删除书籍，只是解除组关联
+    如果组只剩1本书，组会自动删除
+    """
+    from app.core.deduplicator import Deduplicator
+    
+    deduplicator = Deduplicator(db)
+    result = await deduplicator.ungroup_book(book_id)
+    
+    if result["status"] == "error":
+        raise HTTPException(status_code=400, detail=result["message"])
+    
+    log.info(
+        f"管理员 {current_user.username} 将书籍 {result['book_title']} 从组中移除"
+    )
+    
+    return result
+
+
+@router.put("/admin/book-groups/{group_id}/primary")
+async def set_book_group_primary(
+    group_id: int,
+    request: SetGroupPrimaryRequest,
+    current_user: User = Depends(admin_required),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    设置书籍组的主书籍（管理员）
+    
+    主书籍的封面、标题会作为组的显示信息
+    
+    参数：
+    - primary_book_id: 新的主书籍ID（必须在组内）
+    """
+    from app.core.deduplicator import Deduplicator
+    
+    deduplicator = Deduplicator(db)
+    result = await deduplicator.set_group_primary(group_id, request.primary_book_id)
+    
+    if result["status"] == "error":
+        raise HTTPException(status_code=400, detail=result["message"])
+    
+    log.info(
+        f"管理员 {current_user.username} 设置组 {group_id} 的主书籍为 {result['primary_book_title']}"
+    )
+    
+    return result
+
+
 @router.post("/admin/books/{book_id}/auto-tag")
 async def auto_tag_single_book(
     book_id: int,

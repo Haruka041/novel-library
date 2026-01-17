@@ -11,7 +11,7 @@ import {
   Add, Edit, Delete, Refresh, FolderOpen, ExpandMore, ExpandLess,
   PlayArrow, Stop, CheckCircle, Error as ErrorIcon, Schedule,
   Folder, DeleteOutline, AddCircle, LocalOffer, Sync, Warning,
-  Psychology, Code, Preview
+  Psychology, Code, Preview, MergeType, Search as SearchIcon
 } from '@mui/icons-material'
 import api from '../../services/api'
 
@@ -83,6 +83,30 @@ interface ExtractResult {
   changes: ExtractChange[]
 }
 
+interface DuplicateBook {
+  id: number
+  title: string
+  author_name: string | null
+  version_count: number
+  formats: string[]
+  total_size: number
+  added_at: string
+}
+
+interface DuplicateGroup {
+  key: string
+  books: DuplicateBook[]
+  suggested_primary_id: number
+  reason: string
+}
+
+interface DuplicateResult {
+  library_id: number
+  library_name: string
+  duplicate_group_count: number
+  duplicate_groups: DuplicateGroup[]
+}
+
 export default function LibrariesTab() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -139,6 +163,13 @@ export default function LibrariesTab() {
   }
   const [extractTasks, setExtractTasks] = useState<Record<number, ExtractTask>>({})
   const [lastExtractTime, setLastExtractTime] = useState<Record<number, string>>({})
+  
+  // 重复书籍检测和合并
+  const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false)
+  const [duplicateResult, setDuplicateResult] = useState<DuplicateResult | null>(null)
+  const [detectingDuplicates, setDetectingDuplicates] = useState<number | null>(null)
+  const [mergingDuplicates, setMergingDuplicates] = useState(false)
+  const [selectedMergeGroups, setSelectedMergeGroups] = useState<Set<number>>(new Set())
   
   // 表单数据
   const [formData, setFormData] = useState({
@@ -414,6 +445,101 @@ export default function LibrariesTab() {
     } else {
       setSelectedChanges(new Set(extractResult.changes.map(c => c.book_id)))
     }
+  }
+
+  // 检测重复书籍
+  const handleDetectDuplicates = async (libraryId: number) => {
+    setDetectingDuplicates(libraryId)
+    try {
+      const response = await api.get<DuplicateResult>(`/api/admin/libraries/${libraryId}/detect-duplicates`)
+      setDuplicateResult(response.data)
+      setSelectedMergeGroups(new Set(response.data.duplicate_groups.map((_, i) => i)))
+      setDuplicateDialogOpen(true)
+    } catch (err: any) {
+      setError(err.response?.data?.detail || '检测重复书籍失败')
+    } finally {
+      setDetectingDuplicates(null)
+    }
+  }
+  
+  // 合并选中的重复书籍
+  const handleMergeDuplicates = async () => {
+    if (!duplicateResult || selectedMergeGroups.size === 0) return
+    
+    const mergeGroups = duplicateResult.duplicate_groups
+      .filter((_, i) => selectedMergeGroups.has(i))
+      .map(group => ({
+        keep_id: group.suggested_primary_id,
+        merge_ids: group.books.filter(b => b.id !== group.suggested_primary_id).map(b => b.id)
+      }))
+    
+    setMergingDuplicates(true)
+    try {
+      const response = await api.post(`/api/admin/libraries/${duplicateResult.library_id}/merge-duplicates`, {
+        merge_groups: mergeGroups
+      })
+      
+      alert(`合并完成！\n- 处理 ${response.data.merge_group_count} 组\n- 转移 ${response.data.total_merged_versions} 个版本\n- 跳过 ${response.data.total_skipped_duplicates} 个重复文件`)
+      
+      setDuplicateDialogOpen(false)
+      setDuplicateResult(null)
+      loadLibraries()
+    } catch (err: any) {
+      setError(err.response?.data?.detail || '合并失败')
+    } finally {
+      setMergingDuplicates(false)
+    }
+  }
+  
+  // 自动合并所有重复书籍
+  const handleAutoMergeDuplicates = async (libraryId: number) => {
+    const library = libraries.find(l => l.id === libraryId)
+    if (!confirm(`确定要自动检测并合并书库"${library?.name}"中的所有重复书籍吗？\n\n此操作会将同名同作者的书籍合并为一本，保留所有格式版本。\n⚠️ 此操作不可撤销！`)) {
+      return
+    }
+    
+    setDetectingDuplicates(libraryId)
+    try {
+      const response = await api.post(`/api/admin/libraries/${libraryId}/auto-merge-duplicates`)
+      
+      if (response.data.detected_groups === 0) {
+        alert('没有发现重复书籍')
+      } else {
+        alert(`自动合并完成！\n- 检测到 ${response.data.detected_groups} 组重复\n- 成功合并 ${response.data.merged_groups} 组\n- 转移 ${response.data.total_merged_versions} 个版本\n- 跳过 ${response.data.total_skipped_duplicates} 个重复文件`)
+        loadLibraries()
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.detail || '自动合并失败')
+    } finally {
+      setDetectingDuplicates(null)
+    }
+  }
+  
+  const toggleMergeGroupSelection = (index: number) => {
+    setSelectedMergeGroups(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(index)) {
+        newSet.delete(index)
+      } else {
+        newSet.add(index)
+      }
+      return newSet
+    })
+  }
+  
+  const toggleAllMergeGroups = () => {
+    if (!duplicateResult) return
+    if (selectedMergeGroups.size === duplicateResult.duplicate_groups.length) {
+      setSelectedMergeGroups(new Set())
+    } else {
+      setSelectedMergeGroups(new Set(duplicateResult.duplicate_groups.map((_, i) => i)))
+    }
+  }
+  
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return bytes + ' B'
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
   }
 
   const handleApplyContentRating = async (libraryId: number) => {
@@ -860,6 +986,19 @@ export default function LibrariesTab() {
                       >
                         <Code />
                       </IconButton>
+                      <IconButton
+                        size="small"
+                        onClick={() => handleDetectDuplicates(library.id)}
+                        title="检测重复书籍"
+                        color="warning"
+                        disabled={detectingDuplicates === library.id}
+                      >
+                        {detectingDuplicates === library.id ? (
+                          <CircularProgress size={20} />
+                        ) : (
+                          <MergeType />
+                        )}
+                      </IconButton>
                       <IconButton size="small" onClick={() => handleEdit(library)} title="编辑">
                         <Edit />
                       </IconButton>
@@ -1262,6 +1401,149 @@ export default function LibrariesTab() {
         <DialogActions>
           <Button onClick={() => setPathDialogOpen(false)}>取消</Button>
           <Button variant="contained" onClick={handleSubmitPath}>添加</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 重复书籍检测对话框 */}
+      <Dialog 
+        open={duplicateDialogOpen} 
+        onClose={() => !mergingDuplicates && setDuplicateDialogOpen(false)} 
+        maxWidth="lg" 
+        fullWidth
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <MergeType />
+          重复书籍检测结果
+          {duplicateResult && (
+            <Chip 
+              label={`${duplicateResult.library_name}`} 
+              size="small" 
+              color="primary" 
+              sx={{ ml: 1 }}
+            />
+          )}
+        </DialogTitle>
+        <DialogContent>
+          {duplicateResult ? (
+            <>
+              <Box sx={{ mb: 2, display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                <Chip label={`发现 ${duplicateResult.duplicate_group_count} 组重复`} variant="outlined" color="warning" />
+                <Chip label={`已选择 ${selectedMergeGroups.size} 组`} variant="outlined" color="primary" />
+              </Box>
+              
+              {duplicateResult.duplicate_groups.length === 0 ? (
+                <Alert severity="success">没有发现重复书籍</Alert>
+              ) : (
+                <>
+                  <Box sx={{ mb: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Button size="small" onClick={toggleAllMergeGroups}>
+                      {selectedMergeGroups.size === duplicateResult.duplicate_groups.length ? '取消全选' : '全选'}
+                    </Button>
+                    <Typography variant="caption" color="text.secondary">
+                      选中的组将被合并：同组书籍的所有版本会转移到建议保留的书籍
+                    </Typography>
+                  </Box>
+                  
+                  <Box sx={{ maxHeight: 400, overflow: 'auto' }}>
+                    {duplicateResult.duplicate_groups.map((group, index) => (
+                      <Paper 
+                        key={index} 
+                        variant="outlined" 
+                        sx={{ 
+                          p: 2, 
+                          mb: 1, 
+                          cursor: 'pointer',
+                          bgcolor: selectedMergeGroups.has(index) ? 'action.selected' : 'inherit'
+                        }}
+                        onClick={() => toggleMergeGroupSelection(index)}
+                      >
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                          <input
+                            type="checkbox"
+                            checked={selectedMergeGroups.has(index)}
+                            onChange={() => toggleMergeGroupSelection(index)}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <Typography variant="subtitle2" fontWeight="bold">
+                            {group.books[0]?.title || '未知标题'}
+                          </Typography>
+                          <Chip label={group.reason} size="small" variant="outlined" />
+                          <Chip label={`${group.books.length} 本书`} size="small" color="warning" />
+                        </Box>
+                        
+                        <TableContainer>
+                          <Table size="small">
+                            <TableHead>
+                              <TableRow>
+                                <TableCell>状态</TableCell>
+                                <TableCell>书名</TableCell>
+                                <TableCell>作者</TableCell>
+                                <TableCell>版本数</TableCell>
+                                <TableCell>格式</TableCell>
+                                <TableCell>大小</TableCell>
+                              </TableRow>
+                            </TableHead>
+                            <TableBody>
+                              {group.books.map((book) => (
+                                <TableRow 
+                                  key={book.id}
+                                  sx={{ 
+                                    bgcolor: book.id === group.suggested_primary_id ? 'success.main' : 'inherit',
+                                    color: book.id === group.suggested_primary_id ? 'success.contrastText' : 'inherit',
+                                    '& td': {
+                                      color: book.id === group.suggested_primary_id ? 'success.contrastText' : 'inherit'
+                                    }
+                                  }}
+                                >
+                                  <TableCell>
+                                    {book.id === group.suggested_primary_id ? (
+                                      <Chip label="保留" size="small" color="success" />
+                                    ) : (
+                                      <Chip label="合并" size="small" color="default" />
+                                    )}
+                                  </TableCell>
+                                  <TableCell>{book.title}</TableCell>
+                                  <TableCell>{book.author_name || '-'}</TableCell>
+                                  <TableCell>{book.version_count}</TableCell>
+                                  <TableCell>
+                                    {book.formats.map(f => (
+                                      <Chip key={f} label={f} size="small" sx={{ mr: 0.5 }} />
+                                    ))}
+                                  </TableCell>
+                                  <TableCell>{formatFileSize(book.total_size)}</TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </TableContainer>
+                      </Paper>
+                    ))}
+                  </Box>
+                  
+                  <Alert severity="info" sx={{ mt: 2 }}>
+                    合并后，被合并书籍的所有版本将转移到"保留"书籍，然后删除被合并的书籍记录。相同文件将被跳过。
+                  </Alert>
+                </>
+              )}
+            </>
+          ) : null}
+        </DialogContent>
+        <DialogActions>
+          <Button 
+            onClick={() => setDuplicateDialogOpen(false)} 
+            disabled={mergingDuplicates}
+          >
+            取消
+          </Button>
+          <Button 
+            variant="contained" 
+            onClick={handleMergeDuplicates}
+            disabled={mergingDuplicates || !duplicateResult || selectedMergeGroups.size === 0}
+            startIcon={mergingDuplicates ? <CircularProgress size={20} /> : <MergeType />}
+            color="warning"
+          >
+            {mergingDuplicates ? '合并中...' : `合并选中的 ${selectedMergeGroups.size} 组`}
+          </Button>
         </DialogActions>
       </Dialog>
 

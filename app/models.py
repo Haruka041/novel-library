@@ -165,10 +165,14 @@ class Book(Base):
     content_warning = Column(Text, nullable=True)  # 内容警告说明
     
     added_at = Column(DateTime, default=datetime.utcnow, index=True)
+    
+    # 书籍组（关联重复书籍）
+    group_id = Column(Integer, ForeignKey("book_groups.id", ondelete="SET NULL"), nullable=True, index=True)
 
     # 关系
     library = relationship("Library", back_populates="books")
     author = relationship("Author", back_populates="books")
+    group = relationship("BookGroup", back_populates="books", foreign_keys=[group_id])
     versions = relationship("BookVersion", back_populates="book", cascade="all, delete-orphan")
     reading_progress = relationship("ReadingProgress", back_populates="book", cascade="all, delete-orphan")
     book_tags = relationship("BookTag", back_populates="book", cascade="all, delete-orphan")
@@ -293,6 +297,19 @@ class ReadingProgress(Base):
     __table_args__ = (
         UniqueConstraint('user_id', 'book_id', name='uq_user_book_progress'),
     )
+
+
+class BookGroup(Base):
+    """书籍组（用于关联重复/相同的书籍，类似Emby的版本合并）"""
+    __tablename__ = "book_groups"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(200), nullable=True)  # 组名称（可选，默认使用主书籍标题）
+    primary_book_id = Column(Integer, nullable=True)  # 主书籍ID（用于显示封面、标题等）
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # 关系
+    books = relationship("Book", back_populates="group", foreign_keys="Book.group_id")
 
 
 class Bookmark(Base):

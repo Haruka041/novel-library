@@ -4,13 +4,13 @@ import {
   Box, Typography, IconButton, Drawer, List, ListItem, ListItemButton,
   ListItemText, Slider, CircularProgress,
   Alert, AppBar, Toolbar, Divider, FormControl, Select, MenuItem,
-  Grid, Chip
+  Grid, Chip, TextField, InputAdornment, Paper
 } from '@mui/material'
 import {
   ArrowBack, Menu, Settings, TextFields, FormatLineSpacing,
   ChevronLeft, ChevronRight, Fullscreen, FullscreenExit,
   PlayArrow, Stop, Timer, SpaceBar, Bookmark, BookmarkBorder,
-  Delete, Add
+  Delete, Add, Search, Close
 } from '@mui/icons-material'
 import ePub, { Book, Rendition } from 'epubjs'
 import api from '../services/api'
@@ -59,6 +59,25 @@ interface BookmarkInfo {
   note: string | null
   created_at: string
   updated_at: string
+}
+
+interface SearchMatch {
+  chapterIndex: number
+  chapterTitle: string
+  position: number
+  positionInChapter: number
+  context: string
+  highlightStart: number
+  highlightEnd: number
+}
+
+interface SearchResult {
+  keyword: string
+  matches: SearchMatch[]
+  total: number
+  page: number
+  pageSize: number
+  totalPages: number
 }
 
 // 主题预设 (静读天下风格 - 8种主题)
@@ -125,10 +144,17 @@ export default function ReaderPage() {
   const [tocOpen, setTocOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [bookmarksOpen, setBookmarksOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
   
   // 书签
   const [bookmarks, setBookmarks] = useState<BookmarkInfo[]>([])
   const [loadingBookmarks, setLoadingBookmarks] = useState(false)
+  
+  // 搜索
+  const [searchKeyword, setSearchKeyword] = useState('')
+  const [searchResults, setSearchResults] = useState<SearchResult | null>(null)
+  const [searching, setSearching] = useState(false)
+  const [searchPage, setSearchPage] = useState(0)
   
   // 进度 - 基于章节号+章节内偏移
   const [progress, setProgress] = useState(0)
@@ -778,6 +804,59 @@ export default function ReaderPage() {
     }
   }
 
+  // 搜索功能
+  const performSearch = async (keyword: string, page: number = 0) => {
+    if (!id || !keyword.trim()) return
+    
+    try {
+      setSearching(true)
+      const response = await api.get<SearchResult>(`/api/books/${id}/search`, {
+        params: { keyword: keyword.trim(), page, page_size: 20 }
+      })
+      setSearchResults(response.data)
+      setSearchPage(page)
+    } catch (err) {
+      console.error('搜索失败:', err)
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (searchKeyword.trim()) {
+      performSearch(searchKeyword, 0)
+    }
+  }
+
+  const goToSearchResult = (match: SearchMatch) => {
+    setSearchOpen(false)
+    
+    // 跳转到该章节
+    if (match.chapterIndex >= loadedRange.start && match.chapterIndex <= loadedRange.end) {
+      scrollToChapter(match.chapterIndex)
+    } else {
+      loadChapterContent(match.chapterIndex)
+    }
+  }
+
+  // 渲染高亮的上下文文本
+  const renderHighlightedContext = (context: string, highlightStart: number, highlightEnd: number) => {
+    const before = context.substring(0, highlightStart)
+    const highlight = context.substring(highlightStart, highlightEnd)
+    const after = context.substring(highlightEnd)
+    
+    return (
+      <>
+        {before}
+        <Box component="span" sx={{ bgcolor: 'warning.main', color: 'warning.contrastText', px: 0.5, borderRadius: 0.5 }}>
+          {highlight}
+        </Box>
+        {after}
+      </>
+    )
+  }
+
   const goToBookmark = (bookmark: BookmarkInfo) => {
     setBookmarksOpen(false)
     
@@ -949,6 +1028,13 @@ export default function ReaderPage() {
               }}
             >
               {hasBookmarkAtCurrentPosition() ? <Bookmark /> : <BookmarkBorder />}
+            </IconButton>
+          )}
+          
+          {/* 搜索按钮 (仅TXT) */}
+          {!isEpub && (
+            <IconButton color="inherit" onClick={(e) => { e.stopPropagation(); setSearchOpen(true) }}>
+              <Search />
             </IconButton>
           )}
           
@@ -1267,6 +1353,124 @@ export default function ReaderPage() {
               </Typography>
             )}
           </Box>
+        </Box>
+      </Drawer>
+
+      {/* 搜索抽屉 */}
+      <Drawer anchor="right" open={searchOpen} onClose={() => setSearchOpen(false)} onClick={(e) => e.stopPropagation()}>
+        <Box sx={{ width: 360, p: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+            <Typography variant="h6">
+              书内搜索
+            </Typography>
+            <IconButton size="small" onClick={() => setSearchOpen(false)}>
+              <Close />
+            </IconButton>
+          </Box>
+          
+          {/* 搜索框 */}
+          <Box component="form" onSubmit={handleSearchSubmit} sx={{ mb: 2 }}>
+            <TextField
+              fullWidth
+              size="small"
+              placeholder="输入关键词搜索..."
+              value={searchKeyword}
+              onChange={(e) => setSearchKeyword(e.target.value)}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <Search fontSize="small" />
+                  </InputAdornment>
+                ),
+                endAdornment: searchKeyword && (
+                  <InputAdornment position="end">
+                    <IconButton size="small" onClick={() => { setSearchKeyword(''); setSearchResults(null) }}>
+                      <Close fontSize="small" />
+                    </IconButton>
+                  </InputAdornment>
+                )
+              }}
+            />
+          </Box>
+          
+          {/* 搜索结果 */}
+          {searching ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+              <CircularProgress size={24} />
+            </Box>
+          ) : searchResults ? (
+            <>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                找到 {searchResults.total} 个结果
+                {searchResults.totalPages > 1 && ` (第 ${searchResults.page + 1}/${searchResults.totalPages} 页)`}
+              </Typography>
+              
+              {searchResults.matches.length === 0 ? (
+                <Box sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>
+                  <Search sx={{ fontSize: 48, opacity: 0.5 }} />
+                  <Typography variant="body2" sx={{ mt: 1 }}>
+                    未找到匹配结果
+                  </Typography>
+                </Box>
+              ) : (
+                <>
+                  <List sx={{ maxHeight: 'calc(100vh - 280px)', overflow: 'auto' }}>
+                    {searchResults.matches.map((match, idx) => (
+                      <ListItem key={idx} disablePadding sx={{ mb: 1 }}>
+                        <Paper 
+                          elevation={1} 
+                          sx={{ width: '100%', cursor: 'pointer', '&:hover': { bgcolor: 'action.hover' } }}
+                          onClick={() => goToSearchResult(match)}
+                        >
+                          <Box sx={{ p: 1.5 }}>
+                            <Typography variant="caption" color="primary" sx={{ fontWeight: 'bold' }}>
+                              {match.chapterTitle}
+                            </Typography>
+                            <Typography variant="body2" sx={{ mt: 0.5, fontSize: 13, lineHeight: 1.5 }}>
+                              {renderHighlightedContext(match.context, match.highlightStart, match.highlightEnd)}
+                            </Typography>
+                          </Box>
+                        </Paper>
+                      </ListItem>
+                    ))}
+                  </List>
+                  
+                  {/* 分页 */}
+                  {searchResults.totalPages > 1 && (
+                    <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1, mt: 2 }}>
+                      <IconButton 
+                        size="small" 
+                        disabled={searchPage === 0}
+                        onClick={() => performSearch(searchKeyword, searchPage - 1)}
+                      >
+                        <ChevronLeft />
+                      </IconButton>
+                      <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center' }}>
+                        {searchPage + 1} / {searchResults.totalPages}
+                      </Typography>
+                      <IconButton 
+                        size="small"
+                        disabled={searchPage >= searchResults.totalPages - 1}
+                        onClick={() => performSearch(searchKeyword, searchPage + 1)}
+                      >
+                        <ChevronRight />
+                      </IconButton>
+                    </Box>
+                  )}
+                </>
+              )}
+            </>
+          ) : (
+            <Box sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>
+              <Search sx={{ fontSize: 48, opacity: 0.3 }} />
+              <Typography variant="body2" sx={{ mt: 1 }}>
+                输入关键词开始搜索
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                支持中英文搜索
+              </Typography>
+            </Box>
+          )}
         </Box>
       </Drawer>
 

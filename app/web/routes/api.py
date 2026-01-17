@@ -363,16 +363,19 @@ async def list_books(
             ).distinct()
             query = query.where(Book.id.in_(subquery))
     
-    # 按标签筛选
+    # 按标签筛选（AND逻辑：必须同时包含所有选中标签）
     if tag_ids:
         from app.models import BookTag
         try:
             tag_id_list = [int(t.strip()) for t in tag_ids.split(',') if t.strip()]
             if tag_id_list:
-                # 子查询：找到有匹配标签的书籍ID
+                # 子查询：找到同时拥有所有选中标签的书籍ID
+                # 使用 group by + having count 确保必须包含所有标签
                 subquery = select(BookTag.book_id).where(
                     BookTag.tag_id.in_(tag_id_list)
-                ).distinct()
+                ).group_by(BookTag.book_id).having(
+                    func.count(BookTag.tag_id) >= len(tag_id_list)
+                )
                 query = query.where(Book.id.in_(subquery))
         except ValueError:
             pass  # 忽略无效的标签ID
