@@ -442,7 +442,7 @@ class AIService:
     async def batch_analyze_filenames(
         self, 
         filenames: List[str], 
-        batch_size: int = 1000,
+        batch_size: int = 200,
         delay_between_batches: float = 2.0
     ) -> Dict[str, Any]:
         """
@@ -455,7 +455,7 @@ class AIService:
         
         Args:
             filenames: 文件名列表
-            batch_size: 每批处理数量（默认1000）
+            batch_size: 每批处理数量（默认200）
             delay_between_batches: 批次间延迟（秒）
         
         Returns:
