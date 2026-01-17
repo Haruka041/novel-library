@@ -9,7 +9,7 @@ import {
 } from '@mui/material'
 import {
   Add, Delete, Edit, PlayArrow, AutoAwesome, ExpandMore,
-  Code, ContentCopy, Refresh
+  Code, ContentCopy, Refresh, Lightbulb
 } from '@mui/icons-material'
 import api from '../../services/api'
 
@@ -117,6 +117,12 @@ function PatternsTabContent() {
   const [analyzing, setAnalyzing] = useState(false)
   const [analysisResult, setAnalysisResult] = useState<any>(null)
   const [addingPattern, setAddingPattern] = useState<number | null>(null)
+  
+  // AI建议规则状态
+  const [suggestDialogOpen, setSuggestDialogOpen] = useState(false)
+  const [suggestFilename, setSuggestFilename] = useState('')
+  const [suggesting, setSuggesting] = useState(false)
+  const [suggestResult, setSuggestResult] = useState<any>(null)
 
   useEffect(() => {
     loadPatterns()
@@ -374,6 +380,18 @@ function PatternsTabContent() {
             onClick={() => setAnalyzeDialogOpen(true)}
           >
             AI分析
+          </Button>
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={<Lightbulb />}
+            onClick={() => {
+              setSuggestFilename('')
+              setSuggestResult(null)
+              setSuggestDialogOpen(true)
+            }}
+          >
+            AI建议规则
           </Button>
           <Button
             variant="outlined"
@@ -853,6 +871,133 @@ function PatternsTabContent() {
           }}>
             关闭
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* AI建议规则对话框 */}
+      <Dialog open={suggestDialogOpen} onClose={() => setSuggestDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Lightbulb /> AI 建议规则
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            输入一个文件名，AI 将根据现有规则和文件名模式，为你建议一个合适的解析规则。
+          </Typography>
+          
+          <TextField
+            fullWidth
+            label="文件名"
+            value={suggestFilename}
+            onChange={(e) => setSuggestFilename(e.target.value)}
+            placeholder="例如：张三-我的小说.txt"
+            sx={{ mb: 2 }}
+          />
+          
+          <Button
+            variant="contained"
+            onClick={async () => {
+              if (!suggestFilename.trim()) return
+              try {
+                setSuggesting(true)
+                setSuggestResult(null)
+                const response = await api.post('/api/admin/ai/patterns/suggest', null, {
+                  params: { filename: suggestFilename }
+                })
+                setSuggestResult(response.data)
+              } catch (err: any) {
+                setSuggestResult({
+                  success: false,
+                  error: err.response?.data?.detail || '建议失败'
+                })
+              } finally {
+                setSuggesting(false)
+              }
+            }}
+            disabled={suggesting || !suggestFilename.trim()}
+            startIcon={suggesting ? <CircularProgress size={20} /> : <Lightbulb />}
+          >
+            获取建议
+          </Button>
+
+          {suggestResult && (
+            <Box sx={{ mt: 2 }}>
+              {suggestResult.success === false ? (
+                <Alert severity="error">
+                  {typeof suggestResult.error === 'string' ? suggestResult.error : JSON.stringify(suggestResult.error)}
+                </Alert>
+              ) : (
+                <>
+                  <Alert severity="success" sx={{ mb: 2 }}>
+                    AI 建议了以下规则
+                  </Alert>
+                  
+                  {suggestResult.regex && (
+                    <Card variant="outlined" sx={{ mb: 2 }}>
+                      <CardContent>
+                        <Typography variant="subtitle2" gutterBottom>
+                          建议的正则表达式
+                        </Typography>
+                        <Typography variant="body2" sx={{ fontFamily: 'monospace', wordBreak: 'break-all', mb: 1 }}>
+                          {suggestResult.regex}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          书名组: {suggestResult.title_group || 1} | 
+                          作者组: {suggestResult.author_group || 2}
+                          {suggestResult.extra_group > 0 && ` | 额外组: ${suggestResult.extra_group}`}
+                        </Typography>
+                        
+                        {suggestResult.parsed && (
+                          <Box sx={{ mt: 1 }}>
+                            <Typography variant="caption" display="block">
+                              <strong>解析结果：</strong>
+                            </Typography>
+                            <Typography variant="caption" display="block">
+                              书名：{suggestResult.parsed.title || '无'}
+                            </Typography>
+                            <Typography variant="caption" display="block">
+                              作者：{suggestResult.parsed.author || '无'}
+                            </Typography>
+                          </Box>
+                        )}
+                        
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          startIcon={<Add />}
+                          sx={{ mt: 1 }}
+                          onClick={() => {
+                            setFormData({
+                              ...formData,
+                              name: suggestResult.name || 'AI建议规则',
+                              regex_pattern: suggestResult.regex,
+                              title_group: suggestResult.title_group || 1,
+                              author_group: suggestResult.author_group || 2,
+                              extra_group: suggestResult.extra_group || 0,
+                              description: 'AI 建议生成',
+                              example_filename: suggestFilename
+                            })
+                            setSuggestDialogOpen(false)
+                            setDialogOpen(true)
+                          }}
+                        >
+                          使用此规则
+                        </Button>
+                      </CardContent>
+                    </Card>
+                  )}
+                  
+                  {suggestResult.explanation && (
+                    <Typography variant="body2" color="text.secondary">
+                      {suggestResult.explanation}
+                    </Typography>
+                  )}
+                </>
+              )}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSuggestDialogOpen(false)}>关闭</Button>
         </DialogActions>
       </Dialog>
     </Box>

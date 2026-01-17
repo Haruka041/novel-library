@@ -3,11 +3,13 @@ import {
   Box, Typography, Card, CardContent, TextField, Select, MenuItem,
   FormControl, InputLabel, Switch, FormControlLabel, Button, Alert,
   CircularProgress, Divider, Grid, Slider, Chip, Accordion,
-  AccordionSummary, AccordionDetails, InputAdornment, IconButton
+  AccordionSummary, AccordionDetails, InputAdornment, IconButton,
+  Dialog, DialogTitle, DialogContent, DialogActions, Table, TableBody,
+  TableCell, TableRow
 } from '@mui/material'
 import {
   ExpandMore, Visibility, VisibilityOff, Check, Error,
-  Psychology, Settings, AutoAwesome
+  Psychology, Settings, AutoAwesome, Science, Category, TextFields
 } from '@mui/icons-material'
 import api from '../../services/api'
 
@@ -576,6 +578,9 @@ export default function AITab() {
         </AccordionDetails>
       </Accordion>
 
+      {/* AI 测试工具 */}
+      <AITestTools enabled={enabled} />
+
       {/* 使用说明 */}
       <Card sx={{ mt: 2 }}>
         <CardContent>
@@ -591,5 +596,252 @@ export default function AITab() {
         </CardContent>
       </Card>
     </Box>
+  )
+}
+
+// AI 测试工具组件
+function AITestTools({ enabled }: { enabled: boolean }) {
+  const [metadataDialogOpen, setMetadataDialogOpen] = useState(false)
+  const [classifyDialogOpen, setClassifyDialogOpen] = useState(false)
+  
+  // 元数据提取测试
+  const [metadataFilename, setMetadataFilename] = useState('')
+  const [metadataContentPreview, setMetadataContentPreview] = useState('')
+  const [metadataResult, setMetadataResult] = useState<any>(null)
+  const [metadataTesting, setMetadataTesting] = useState(false)
+  
+  // 分类测试
+  const [classifyTitle, setClassifyTitle] = useState('')
+  const [classifyContentPreview, setClassifyContentPreview] = useState('')
+  const [classifyResult, setClassifyResult] = useState<any>(null)
+  const [classifyTesting, setClassifyTesting] = useState(false)
+  
+  const handleTestMetadata = async () => {
+    if (!metadataFilename.trim()) return
+    
+    try {
+      setMetadataTesting(true)
+      setMetadataResult(null)
+      const response = await api.post('/api/admin/ai/extract-metadata', null, {
+        params: {
+          filename: metadataFilename,
+          content_preview: metadataContentPreview
+        }
+      })
+      setMetadataResult(response.data)
+    } catch (err: any) {
+      setMetadataResult({
+        success: false,
+        error: err.response?.data?.detail || '测试失败'
+      })
+    } finally {
+      setMetadataTesting(false)
+    }
+  }
+  
+  const handleTestClassify = async () => {
+    if (!classifyTitle.trim()) return
+    
+    try {
+      setClassifyTesting(true)
+      setClassifyResult(null)
+      const response = await api.post('/api/admin/ai/classify', null, {
+        params: {
+          title: classifyTitle,
+          content_preview: classifyContentPreview
+        }
+      })
+      setClassifyResult(response.data)
+    } catch (err: any) {
+      setClassifyResult({
+        success: false,
+        error: err.response?.data?.detail || '测试失败'
+      })
+    } finally {
+      setClassifyTesting(false)
+    }
+  }
+  
+  return (
+    <>
+      <Accordion>
+        <AccordionSummary expandIcon={<ExpandMore />}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Science />
+            <Typography>AI 测试工具</Typography>
+          </Box>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Typography variant="body2" color="text.secondary" gutterBottom>
+            使用这些工具测试 AI 功能是否正常工作。需要先启用 AI 并保存配置。
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 2, mt: 2, flexWrap: 'wrap' }}>
+            <Button
+              variant="outlined"
+              startIcon={<TextFields />}
+              onClick={() => setMetadataDialogOpen(true)}
+              disabled={!enabled}
+            >
+              测试元数据提取
+            </Button>
+            <Button
+              variant="outlined"
+              startIcon={<Category />}
+              onClick={() => setClassifyDialogOpen(true)}
+              disabled={!enabled}
+            >
+              测试 AI 分类
+            </Button>
+          </Box>
+          {!enabled && (
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              请先启用 AI 功能并保存配置
+            </Alert>
+          )}
+        </AccordionDetails>
+      </Accordion>
+      
+      {/* 元数据提取测试对话框 */}
+      <Dialog open={metadataDialogOpen} onClose={() => setMetadataDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <TextFields /> 测试元数据提取
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            输入文件名，AI 将尝试从中提取书名、作者等元数据。
+          </Typography>
+          <TextField
+            fullWidth
+            label="文件名"
+            value={metadataFilename}
+            onChange={(e) => setMetadataFilename(e.target.value)}
+            placeholder="例如：张三-我的小说.txt"
+            sx={{ mb: 2 }}
+          />
+          <TextField
+            fullWidth
+            label="内容预览（可选）"
+            multiline
+            rows={3}
+            value={metadataContentPreview}
+            onChange={(e) => setMetadataContentPreview(e.target.value)}
+            placeholder="粘贴书籍开头的一些内容，可帮助 AI 更准确地识别"
+            sx={{ mb: 2 }}
+          />
+          <Button
+            variant="contained"
+            onClick={handleTestMetadata}
+            disabled={metadataTesting || !metadataFilename.trim()}
+            startIcon={metadataTesting ? <CircularProgress size={20} /> : <Science />}
+          >
+            开始测试
+          </Button>
+          
+          {metadataResult && (
+            <Box sx={{ mt: 2 }}>
+              <Alert severity={metadataResult.success ? 'success' : 'error'} sx={{ mb: 1 }}>
+                {metadataResult.success ? '提取成功！' : (metadataResult.error || '提取失败')}
+              </Alert>
+              {metadataResult.success && metadataResult.metadata && (
+                <Table size="small">
+                  <TableBody>
+                    {Object.entries(metadataResult.metadata).map(([key, value]) => (
+                      <TableRow key={key}>
+                        <TableCell sx={{ fontWeight: 'bold', width: '30%' }}>{key}</TableCell>
+                        <TableCell>{String(value) || '-'}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            setMetadataDialogOpen(false)
+            setMetadataResult(null)
+          }}>
+            关闭
+          </Button>
+        </DialogActions>
+      </Dialog>
+      
+      {/* AI 分类测试对话框 */}
+      <Dialog open={classifyDialogOpen} onClose={() => setClassifyDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Category /> 测试 AI 分类
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            输入书名，AI 将尝试为其分类并推荐标签。
+          </Typography>
+          <TextField
+            fullWidth
+            label="书名"
+            value={classifyTitle}
+            onChange={(e) => setClassifyTitle(e.target.value)}
+            placeholder="例如：三体"
+            sx={{ mb: 2 }}
+          />
+          <TextField
+            fullWidth
+            label="内容预览（可选）"
+            multiline
+            rows={3}
+            value={classifyContentPreview}
+            onChange={(e) => setClassifyContentPreview(e.target.value)}
+            placeholder="粘贴书籍开头的一些内容，可帮助 AI 更准确地分类"
+            sx={{ mb: 2 }}
+          />
+          <Button
+            variant="contained"
+            onClick={handleTestClassify}
+            disabled={classifyTesting || !classifyTitle.trim()}
+            startIcon={classifyTesting ? <CircularProgress size={20} /> : <Science />}
+          >
+            开始测试
+          </Button>
+          
+          {classifyResult && (
+            <Box sx={{ mt: 2 }}>
+              <Alert severity={classifyResult.success ? 'success' : 'error'} sx={{ mb: 1 }}>
+                {classifyResult.success ? '分类成功！' : (classifyResult.error || '分类失败')}
+              </Alert>
+              {classifyResult.success && classifyResult.classification && (
+                <Table size="small">
+                  <TableBody>
+                    {Object.entries(classifyResult.classification).map(([key, value]) => (
+                      <TableRow key={key}>
+                        <TableCell sx={{ fontWeight: 'bold', width: '30%' }}>{key}</TableCell>
+                        <TableCell>
+                          {Array.isArray(value) ? (
+                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                              {(value as string[]).map((tag, i) => (
+                                <Chip key={i} label={tag} size="small" />
+                              ))}
+                            </Box>
+                          ) : (
+                            String(value) || '-'
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            setClassifyDialogOpen(false)
+            setClassifyResult(null)
+          }}>
+            关闭
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </>
   )
 }
