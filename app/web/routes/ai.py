@@ -17,7 +17,6 @@ from app.database import get_db
 from app.models import Book, Library, FilenamePattern, Tag, User
 from app.web.routes.auth import get_current_admin, get_current_user
 from app.utils.logger import log
-from app.utils.filename_analyzer import analyze_filename_with_ai
 from app.core.ai.service import ai_service
 
 router = APIRouter()
