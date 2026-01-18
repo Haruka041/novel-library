@@ -185,3 +185,33 @@ class MobiParser:
         except Exception as e:
             log.warning(f"提取MOBI封面失败: {file_path}, 错误: {e}")
             return None
+
+    def extract_text(self, file_path: Path) -> Optional[str]:
+        """
+        从MOBI/AZW3文件中提取纯文本内容
+        """
+        try:
+            import mobi
+            from bs4 import BeautifulSoup
+            
+            # 解压
+            # mobi.extract 返回 (tempdir, filepath)
+            tempdir, filepath = mobi.extract(str(file_path))
+            content = ""
+            
+            try:
+                if os.path.isfile(filepath):
+                    # 读取主文件内容
+                    with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                        soup = BeautifulSoup(f.read(), 'html.parser')
+                        # 使用换行符分隔段落
+                        content = soup.get_text(separator='\n')
+            finally:
+                # 清理临时文件
+                shutil.rmtree(tempdir, ignore_errors=True)
+                
+            return content
+            
+        except Exception as e:
+            log.error(f"提取MOBI文本失败: {file_path}, 错误: {e}")
+            return None

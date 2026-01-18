@@ -16,14 +16,18 @@ from app.models import Book, User
 from app.web.routes.auth import get_current_user
 from app.web.routes.dependencies import get_accessible_book
 from app.utils.logger import log
+from app.config import settings
 from app.core.metadata.comic_parser import ComicParser
 from app.core.metadata.txt_parser import TxtParser
+from app.core.metadata.mobi_parser import MobiParser
 from io import BytesIO
+import hashlib
 
 router = APIRouter()
 
-# 实例化全局 TxtParser 用于缓存
+# 实例化全局解析器
 txt_parser = TxtParser()
+mobi_parser = MobiParser()
 
 # 大文件阈值：500KB
 LARGE_FILE_THRESHOLD = 500 * 1024
@@ -50,24 +54,27 @@ async def get_book_toc(
     file_path = Path(version.file_path)
     file_format = version.file_format.lower()
     
-    if file_format in ['txt', '.txt']:
+    if file_format in ['txt', '.txt', 'mobi', '.mobi', 'azw3', '.azw3']:
         # 读取全文并解析章节（仅提取目录，不返回内容）
-        encodings = ['utf-8', 'gbk', 'gb2312', 'gb18030']
         content = None
         
-        for encoding in encodings:
-            try:
-                with open(file_path, 'r', encoding=encoding) as f:
-                    content = f.read()
-                break
-            except UnicodeDecodeError:
-                continue
+        if file_format in ['mobi', '.mobi', 'azw3', '.azw3']:
+            content = await _get_mobi_text(file_path)
+        else:
+            encodings = ['utf-8', 'gbk', 'gb2312', 'gb18030']
+            for encoding in encodings:
+                try:
+                    with open(file_path, 'r', encoding=encoding) as f:
+                        content = f.read()
+                    break
+                except UnicodeDecodeError:
+                    continue
+            if content:
+                content = _clean_txt_content(content)
         
         if content is None:
-            raise HTTPException(status_code=500, detail="无法解码文件内容")
+            raise HTTPException(status_code=500, detail="无法读取文件内容")
         
-        # 清理内容
-        content = _clean_txt_content(content)
         total_length = len(content)
         
         # 解析章节
@@ -136,14 +143,18 @@ async def get_chapter_content(
     file_path = Path(version.file_path)
     file_format = version.file_format.lower()
     
-    if file_format not in ['txt', '.txt']:
-        raise HTTPException(status_code=400, detail="此API仅支持TXT格式")
+    if file_format not in ['txt', '.txt', 'mobi', '.mobi', 'azw3', '.azw3']:
+        raise HTTPException(status_code=400, detail="此API仅支持TXT/MOBI/AZW3格式")
     
     # 读取文件内容
-    content = await _read_txt_file(file_path)
+    if file_format in ['mobi', '.mobi', 'azw3', '.azw3']:
+        content = await _get_mobi_text(file_path)
+    else:
+        content = await _read_txt_file(file_path)
+        
     if content is None:
-        log.error(f"无法解码文件内容: {file_path}")
-        raise HTTPException(status_code=500, detail="无法解码文件内容")
+        log.error(f"无法读取文件内容: {file_path}")
+        raise HTTPException(status_code=500, detail="无法读取文件内容")
     
     # 解析章节
     all_chapters = _parse_chapters(content)
@@ -189,6 +200,47 @@ async def get_chapter_content(
             "end": end_index - 1
         }
     }
+
+
+async def _get_mobi_text(file_path: Path) -> Optional[str]:
+    """获取MOBI/AZW3文件的文本内容（带缓存）"""
+    try:
+        # 确保缓存目录存在
+        cache_dir = Path(settings.directories.data) / "cache" / "mobi_txt"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 计算文件哈希作为缓存文件名
+        file_stat = file_path.stat()
+        file_hash_str = f"{file_path.name}_{file_stat.st_size}_{file_stat.st_mtime}"
+        cache_filename = hashlib.md5(file_hash_str.encode()).hexdigest() + ".txt"
+        cache_path = cache_dir / cache_filename
+        
+        # 检查缓存
+        if cache_path.exists():
+            log.debug(f"使用MOBI文本缓存: {file_path.name}")
+            return await _read_txt_file(cache_path)
+            
+        # 提取文本
+        log.info(f"提取MOBI文本: {file_path.name}")
+        # 在线程池中运行提取，避免阻塞异步循环
+        import asyncio
+        from concurrent.futures import ThreadPoolExecutor
+        
+        loop = asyncio.get_event_loop()
+        content = await loop.run_in_executor(None, mobi_parser.extract_text, file_path)
+        
+        if content:
+            # 清理内容
+            content = _clean_txt_content(content)
+            # 写入缓存
+            with open(cache_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            return content
+            
+        return None
+    except Exception as e:
+        log.error(f"获取MOBI文本失败: {e}")
+        return None
 
 
 async def _read_txt_file(file_path: Path) -> Optional[str]:
@@ -250,7 +302,27 @@ async def get_book_content(
     # 根据文件格式返回内容
     file_format = version.file_format.lower()
     
-    if file_format == 'txt' or file_format == '.txt':
+    if file_format in ['txt', '.txt', 'mobi', '.mobi', 'azw3', '.azw3']:
+        if file_format in ['mobi', '.mobi', 'azw3', '.azw3']:
+            # 对于MOBI，先获取文本内容缓存路径
+            content = await _get_mobi_text(file_path)
+            if not content:
+                raise HTTPException(status_code=500, detail="无法提取MOBI内容")
+            
+            # 为了复用 _read_txt_content 的分页逻辑，我们需要构造一个临时的缓存文件路径
+            # 这里我们简单一点：使用 _get_mobi_text 已经生成的缓存文件
+            
+            cache_dir = Path(settings.directories.data) / "cache" / "mobi_txt"
+            file_stat = file_path.stat()
+            file_hash_str = f"{file_path.name}_{file_stat.st_size}_{file_stat.st_mtime}"
+            cache_filename = hashlib.md5(file_hash_str.encode()).hexdigest() + ".txt"
+            cache_path = cache_dir / cache_filename
+            
+            if cache_path.exists():
+                return await _read_txt_content(cache_path, page)
+            else:
+                 raise HTTPException(status_code=500, detail="MOBI缓存文件丢失")
+                 
         return await _read_txt_content(file_path, page)
     elif file_format == 'epub' or file_format == '.epub':
         # EPUB 文件直接返回，由前端 epub.js 处理
@@ -515,13 +587,17 @@ async def search_in_book(
     file_path = Path(version.file_path)
     file_format = version.file_format.lower()
     
-    if file_format not in ['txt', '.txt']:
-        raise HTTPException(status_code=400, detail="书内搜索仅支持TXT格式")
+    if file_format not in ['txt', '.txt', 'mobi', '.mobi', 'azw3', '.azw3']:
+        raise HTTPException(status_code=400, detail="书内搜索仅支持TXT/MOBI/AZW3格式")
     
     # 读取文件内容
-    content = await _read_txt_file(file_path)
+    if file_format in ['mobi', '.mobi', 'azw3', '.azw3']:
+        content = await _get_mobi_text(file_path)
+    else:
+        content = await _read_txt_file(file_path)
+        
     if content is None:
-        raise HTTPException(status_code=500, detail="无法解码文件内容")
+        raise HTTPException(status_code=500, detail="无法读取文件内容")
     
     # 解析章节
     all_chapters = _parse_chapters(content)

@@ -25,12 +25,12 @@ ALLOWED_EXTENSIONS = {'.ttf', '.otf', '.woff', '.woff2'}
 
 # 内置字体列表
 BUILTIN_FONTS = [
-    {"id": "system", "name": "系统默认", "family": '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'},
-    {"id": "noto-serif", "name": "思源宋体", "family": '"Noto Serif SC", "Source Han Serif CN", serif'},
-    {"id": "noto-sans", "name": "思源黑体", "family": '"Noto Sans SC", "Source Han Sans CN", sans-serif'},
-    {"id": "fangsong", "name": "仿宋", "family": '"FangSong", "STFangsong", serif'},
-    {"id": "kaiti", "name": "楷体", "family": '"KaiTi", "STKaiti", serif'},
-    {"id": "songti", "name": "宋体", "family": '"SimSun", "STSong", serif'},
+    {"id": "system", "name": "系统默认", "family": '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"'},
+    {"id": "noto-serif", "name": "思源宋体", "family": '"Noto Serif SC", "Source Han Serif CN", "Songti SC", "SimSun", "STSong", "AR PL New Sung", "AR PL SungtiL GB", "NSimSun", "Tw-Sung", "WenQuanYi Bitmap Song", "AR PL UMing CN", "AR PL UMing HK", "AR PL UMing TW", "AR PL UMing TW MBE", "PMingLiU", "MingLiU", serif'},
+    {"id": "noto-sans", "name": "思源黑体", "family": '"Noto Sans SC", "Source Han Sans CN", "PingFang SC", "Microsoft YaHei", "Heiti SC", "WenQuanYi Micro Hei", "sans-serif"'},
+    {"id": "fangsong", "name": "仿宋", "family": '"FangSong", "STFangsong", "FangSong_GB2312", serif'},
+    {"id": "kaiti", "name": "楷体", "family": '"KaiTi", "STKaiti", "KaiTi_GB2312", "AR PL UKai CN", "AR PL UKai HK", "AR PL UKai TW", "AR PL UKai TW MBE", serif'},
+    {"id": "songti", "name": "宋体", "family": '"SimSun", "STSong", "Songti SC", "Noto Serif SC", serif'},
 ]
 
 

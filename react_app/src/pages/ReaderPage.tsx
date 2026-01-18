@@ -616,6 +616,29 @@ export default function ReaderPage() {
     }
   }
 
+  // 动态加载自定义字体
+  useEffect(() => {
+    const font = fonts.find(f => f.id === selectedFontId)
+    // 只有非内置字体且有文件URL时才需要加载
+    if (font && !font.is_builtin && font.file_url) {
+      const styleId = `font-style-${font.id}`
+      if (!document.getElementById(styleId)) {
+        const style = document.createElement('style')
+        style.id = styleId
+        // 从 family 字符串中提取字体名（去除引号）
+        const fontName = font.family.replace(/['"]/g, '')
+        style.textContent = `
+          @font-face {
+            font-family: "${fontName}";
+            src: url("${font.file_url}");
+            font-display: swap;
+          }
+        `
+        document.head.appendChild(style)
+      }
+    }
+  }, [selectedFontId, fonts])
+
   // EPUB 主题应用
   useEffect(() => {
     if (epubRendition) {
@@ -669,7 +692,7 @@ export default function ReaderPage() {
       if (fileFormat === 'epub' || fileFormat === '.epub') {
         setFormat('epub')
         await loadEpub()
-      } else if (fileFormat === 'txt' || fileFormat === '.txt') {
+      } else if (['txt', '.txt', 'mobi', '.mobi', 'azw3', '.azw3'].includes(fileFormat)) {
         setFormat('txt')
         // 保存待恢复的偏移
         pendingScrollOffsetRef.current = initialChapterOffset
