@@ -110,6 +110,7 @@ async def opds_root(
     )
 
 
+@router.get("/search_descriptor")
 @router.get("/search-descriptor")
 async def opds_search_descriptor_public(request: Request):
     """

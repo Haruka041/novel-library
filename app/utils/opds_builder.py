@@ -49,6 +49,7 @@ def build_opds_root(base_url: str) -> str:
   
   <link rel="self" href="{base_url}/opds" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
   <link rel="start" href="{base_url}/opds" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
+  <link rel="search" href="{base_url}/opds/search_descriptor" type="application/opensearchdescription+xml" title="Search"/>
   
   <entry>
     <title>最新书籍</title>
@@ -287,8 +288,10 @@ def build_opds_search_descriptor(base_url: str) -> str:
     """
     xml = f'''<?xml version="1.0" encoding="UTF-8"?>
 <OpenSearchDescription xmlns="http://a9.com/-/spec/opensearch/1.1/">
-  <ShortName>小说书库搜索</ShortName>
-  <Description>搜索小说书库中的书籍</Description>
+  <ShortName>Novel Library Search</ShortName>
+  <Description>Search for books in Novel Library</Description>
+  <InputEncoding>UTF-8</InputEncoding>
+  <OutputEncoding>UTF-8</OutputEncoding>
   <Url type="application/atom+xml;profile=opds-catalog;kind=acquisition"
        template="{base_url}/opds/search?q={{searchTerms}}"/>
 </OpenSearchDescription>'''

@@ -96,7 +96,7 @@ interface BookGroupInfo {
 export default function BookDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { token } = useAuthStore()
+  const { token, user } = useAuthStore()
   
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -597,40 +597,44 @@ export default function BookDetailPage() {
             >
               下载
             </Button>
-            <Button
-              variant="outlined"
-              size="large"
-              startIcon={<Edit />}
-              onClick={handleOpenEditDialog}
-            >
-              编辑
-            </Button>
-            <Button
-              variant="outlined"
-              size="large"
-              startIcon={<LocalOffer />}
-              onClick={handleOpenTagDialog}
-            >
-              标签
-            </Button>
-            {book.versions && book.versions.length > 1 && (
-              <Button
-                variant="outlined"
-                size="large"
-                startIcon={<Layers />}
-                onClick={() => setVersionDialogOpen(true)}
-              >
-                版本 ({book.versions.length})
-              </Button>
+            {user?.isAdmin && (
+              <>
+                <Button
+                  variant="outlined"
+                  size="large"
+                  startIcon={<Edit />}
+                  onClick={handleOpenEditDialog}
+                >
+                  编辑
+                </Button>
+                <Button
+                  variant="outlined"
+                  size="large"
+                  startIcon={<LocalOffer />}
+                  onClick={handleOpenTagDialog}
+                >
+                  标签
+                </Button>
+                {book.versions && book.versions.length > 1 && (
+                  <Button
+                    variant="outlined"
+                    size="large"
+                    startIcon={<Layers />}
+                    onClick={() => setVersionDialogOpen(true)}
+                  >
+                    版本 ({book.versions.length})
+                  </Button>
+                )}
+                <Button
+                  variant="outlined"
+                  size="large"
+                  startIcon={<Collections />}
+                  onClick={handleOpenGroupDialog}
+                >
+                  书籍组
+                </Button>
+              </>
             )}
-            <Button
-              variant="outlined"
-              size="large"
-              startIcon={<Collections />}
-              onClick={handleOpenGroupDialog}
-            >
-              书籍组
-            </Button>
             {annotationCount > 0 && (
               <Button
                 variant="outlined"

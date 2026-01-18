@@ -17,10 +17,13 @@ from app.web.routes.auth import get_current_user
 from app.web.routes.dependencies import get_accessible_book
 from app.utils.logger import log
 from app.core.metadata.comic_parser import ComicParser
+from app.core.metadata.txt_parser import TxtParser
 from io import BytesIO
 
 router = APIRouter()
 
+# 实例化全局 TxtParser 用于缓存
+txt_parser = TxtParser()
 
 # 大文件阈值：500KB
 LARGE_FILE_THRESHOLD = 500 * 1024
@@ -114,64 +117,6 @@ async def get_book_toc(
         raise HTTPException(status_code=400, detail=f"不支持的文件格式: {file_format}")
 
 
-def _parse_chapters(content: str) -> list:
-    """解析章节目录"""
-    import re
-    
-    chapter_patterns = [
-        # 标准中文章节：第xxx章/节/卷/集/部/篇/回
-        r'^第[零一二三四五六七八九十百千万亿\d]+[章节卷集部篇回].*$',
-        # 英文章节：Chapter 1
-        r'^Chapter\s+\d+.*$',
-        # 卷号：卷一
-        r'^卷[零一二三四五六七八九十百千\d]+.*$',
-        # 特殊符号包裹：【xxx】、[xxx]、(xxx)
-        r'^[【\[\(].+[】\]\)]$',
-        # 纯数字章节：1、2、3 (通常后面跟标题)
-        r'^\d+\s+.*$',
-        # 序章、前言、后记、番外
-        r'^(序章|前言|后记|番外|尾声|楔子).*$',
-        # 章节名直接开始（需要谨慎，避免误判）
-        # r'^[^\s].*$' 
-    ]
-    
-    all_matches = []
-    
-    for pattern in chapter_patterns:
-        regex = re.compile(pattern, re.MULTILINE | re.IGNORECASE)
-        for match in regex.finditer(content):
-            all_matches.append({
-                "title": match.group().strip(),
-                "startOffset": match.start()
-            })
-    
-    # 按位置排序并去重
-    all_matches.sort(key=lambda x: x["startOffset"])
-    
-    filtered = []
-    for match in all_matches:
-        if not filtered or match["startOffset"] - filtered[-1]["startOffset"] > 100:
-            filtered.append(match)
-    
-    # 计算结束位置
-    chapters = []
-    for i, ch in enumerate(filtered):
-        end_offset = filtered[i + 1]["startOffset"] if i < len(filtered) - 1 else len(content)
-        chapters.append({
-            "title": ch["title"],
-            "startOffset": ch["startOffset"],
-            "endOffset": end_offset
-        })
-    
-    # 如果没有章节，返回"全文"
-    if not chapters:
-        chapters.append({
-            "title": "全文",
-            "startOffset": 0,
-            "endOffset": len(content)
-        })
-    
-    return chapters
 
 
 @router.get("/books/{book_id}/chapter/{chapter_index}")

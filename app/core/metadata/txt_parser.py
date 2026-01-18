@@ -6,8 +6,10 @@ TXT文件名解析器
 """
 import json
 import re
+import hashlib
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+from functools import lru_cache
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import FilenamePattern
 from app.utils.logger import log
 
+# 简单的内存缓存
+# Key: (file_path_str, file_mtime, file_size)
+# Value: chapters_list
+_toc_cache = {}
 
 class TxtParser:
     """TXT文件名解析器（支持动态规则）"""
@@ -45,7 +51,130 @@ class TxtParser:
         self.db = db
         self.custom_patterns: List[Tuple] = []
         self.pattern_stats: Dict[int, Dict] = {}  # pattern_id -> {matches, successes}
-    
+        
+    def parse_toc(self, file_path: Path) -> List[Dict]:
+        """
+        解析章节目录（带缓存）
+        
+        Args:
+            file_path: 文件路径
+            
+        Returns:
+            章节列表
+        """
+        try:
+            stat = file_path.stat()
+            cache_key = (str(file_path), stat.st_mtime, stat.st_size)
+            
+            if cache_key in _toc_cache:
+                return _toc_cache[cache_key]
+            
+            # 读取内容并解析
+            content = self._read_file_content(file_path)
+            if not content:
+                return []
+                
+            chapters = self._parse_chapters(content)
+            
+            # 存入缓存 (简单的LRU机制：如果太大就清空)
+            if len(_toc_cache) > 100:
+                _toc_cache.clear()
+            _toc_cache[cache_key] = chapters
+            
+            return chapters
+        except Exception as e:
+            log.error(f"解析目录失败: {file_path}, 错误: {e}")
+            return []
+
+    def _read_file_content(self, file_path: Path) -> Optional[str]:
+        """读取文件内容（尝试多种编码）"""
+        import chardet
+        
+        # 1. 尝试常见编码
+        encodings = ['utf-8', 'gbk', 'gb2312', 'gb18030', 'big5', 'utf-16']
+        
+        for encoding in encodings:
+            try:
+                with open(file_path, 'r', encoding=encoding) as f:
+                    return self._clean_content(f.read())
+            except UnicodeDecodeError:
+                continue
+                
+        # 2. 自动检测
+        try:
+            with open(file_path, 'rb') as f:
+                raw_data = f.read(10000)
+                result = chardet.detect(raw_data)
+                encoding = result['encoding']
+                if encoding:
+                    with open(file_path, 'r', encoding=encoding) as f:
+                        return self._clean_content(f.read())
+        except Exception:
+            pass
+            
+        return None
+
+    def _clean_content(self, content: str) -> str:
+        """清理内容"""
+        # 移除零宽字符
+        content = re.sub(r'[\u200b\u200c\u200d\ufeff]', '', content)
+        # 规范化换行
+        content = re.sub(r'\r\n', '\n', content)
+        return content
+
+    def _parse_chapters(self, content: str) -> List[Dict]:
+        """解析章节列表"""
+        chapter_patterns = [
+            # 允许缩进
+            r'^\s*第[零一二三四五六七八九十百千万亿\d]+[章节卷集部篇回].*$',
+            r'^\s*Chapter\s+\d+.*$',
+            r'^\s*卷[零一二三四五六七八九十百千\d]+.*$',
+            r'^\s*[【\[\(].+[】\]\)]$',
+            r'^\s*\d+\s+.*$',
+            r'^\s*(序章|前言|后记|番外|尾声|楔子).*$',
+        ]
+        
+        matches = []
+        for pattern in chapter_patterns:
+            for match in re.finditer(pattern, content, re.MULTILINE):
+                matches.append({
+                    "title": match.group().strip(),
+                    "startOffset": match.start()
+                })
+        
+        # 排序并去重
+        matches.sort(key=lambda x: x["startOffset"])
+        
+        unique_matches = []
+        if matches:
+            unique_matches.append(matches[0])
+            for i in range(1, len(matches)):
+                # 如果距离太近，可能是重复匹配或错误匹配
+                if matches[i]["startOffset"] - unique_matches[-1]["startOffset"] > 50:
+                    unique_matches.append(matches[i])
+        
+        # 计算结束位置
+        chapters = []
+        total_len = len(content)
+        
+        for i, match in enumerate(unique_matches):
+            end_offset = unique_matches[i+1]["startOffset"] if i < len(unique_matches) - 1 else total_len
+            chapters.append({
+                "title": match["title"],
+                "startOffset": match["startOffset"],
+                "endOffset": end_offset
+            })
+            
+        # 如果没有章节，添加全文
+        if not chapters:
+            chapters.append({
+                "title": "全文",
+                "startOffset": 0,
+                "endOffset": total_len
+            })
+            
+        return chapters
+
     async def load_custom_patterns(self):
         """从数据库加载自定义规则（按优先级排序）"""
         if not self.db:
@@ -191,7 +320,7 @@ class TxtParser:
     
     def _normalize(self, text: str) -> str:
         """
-        标准化文本（去除首尾空格）
+        标准化文本（去除首尾空格和可能的后缀）
         
         Args:
             text: 原始文本
@@ -199,7 +328,15 @@ class TxtParser:
         Returns:
             标准化后的文本
         """
-        return text.strip()
+        text = text.strip()
+        # 去除可能包含在捕获组中的文件后缀
+        # 这通常发生在正则写得不够严谨，或者文件名包含多重后缀时
+        lower_text = text.lower()
+        for ext in ['.txt', '.epub', '.mobi', '.azw3', '.zip', '.rar']:
+            if lower_text.endswith(ext):
+                text = text[:-len(ext)].strip()
+                break
+        return text
     
     def _record_match(self, pattern_id: int, success: bool):
         """

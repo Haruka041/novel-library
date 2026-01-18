@@ -87,12 +87,13 @@ export default function HistoryPage() {
           </Typography>
         </Paper>
       ) : (
-        <Grid container spacing={3}>
+        <Grid container spacing={2}>
           {history.map((item) => (
-            <Grid item xs={12} sm={6} md={4} lg={3} key={item.book_id}>
-              <Paper sx={{ p: 2 }}>
+            <Grid item xs={6} sm={4} md={3} lg={2} key={item.book_id}>
+              <Paper sx={{ p: 1.5, height: '100%', display: 'flex', flexDirection: 'column' }}>
                 {/* 书籍卡片 */}
-                <BookCard
+                <Box sx={{ flexGrow: 1 }}>
+                  <BookCard
                   book={{
                     id: item.book_id,
                     title: item.book_title,
@@ -101,37 +102,46 @@ export default function HistoryPage() {
                     added_at: item.last_read_at,
                     cover_url: null,
                     is_new: false,
-                  }}
-                />
+                    book={{
+                      id: item.book_id,
+                      title: item.book_title,
+                      author_name: item.author_name,
+                      file_format: '',
+                      added_at: item.last_read_at,
+                      cover_url: null,
+                      is_new: false,
+                    }}
+                  />
+                </Box>
 
                 {/* 阅读进度 */}
-                <Box sx={{ mt: 2 }}>
+                <Box sx={{ mt: 1.5 }}>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                    <Typography variant="caption" color="text.secondary">
-                      阅读进度
+                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
+                      进度
                     </Typography>
-                    <Typography variant="caption" fontWeight="medium">
+                    <Typography variant="caption" fontWeight="medium" sx={{ fontSize: '0.7rem' }}>
                       {Math.round(item.progress * 100)}%
                     </Typography>
                   </Box>
                   <LinearProgress
                     variant="determinate"
                     value={item.progress * 100}
-                    sx={{ height: 6, borderRadius: 3 }}
+                    sx={{ height: 4, borderRadius: 2 }}
                   />
 
                   {/* 状态标签 */}
-                  <Box sx={{ mt: 1, display: 'flex', gap: 1, alignItems: 'center' }}>
+                  <Box sx={{ mt: 1, display: 'flex', gap: 0.5, alignItems: 'center', flexWrap: 'wrap' }}>
                     {item.finished && (
                       <Chip
-                        icon={<CheckCircle />}
+                        icon={<CheckCircle sx={{ fontSize: '0.9rem !important' }} />}
                         label="已读完"
                         size="small"
                         color="success"
-                        sx={{ fontSize: '0.7rem', height: 22 }}
+                        sx={{ fontSize: '0.65rem', height: 20, '& .MuiChip-icon': { ml: 0.5 } }}
                       />
                     )}
-                    <Typography variant="caption" color="text.secondary" title={formatDateShort(item.last_read_at)}>
+                    <Typography variant="caption" color="text.secondary" title={formatDateShort(item.last_read_at)} noWrap sx={{ fontSize: '0.7rem', ml: 'auto' }}>
                       {formatRelativeTime(item.last_read_at)}
                     </Typography>
                   </Box>

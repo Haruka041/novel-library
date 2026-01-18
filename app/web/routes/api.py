@@ -744,9 +744,9 @@ async def update_book(
     book_data: BookUpdate,
     book: Book = Depends(get_accessible_book),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_admin)
 ):
-    """更新书籍信息"""
+    """更新书籍信息（需要管理员权限）"""
     # 更新基本字段
     if book_data.title is not None:
         book.title = book_data.title
