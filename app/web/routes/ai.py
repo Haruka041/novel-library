@@ -72,13 +72,17 @@ class TaskStatusResponse(BaseModel):
 
 # ===== 后台任务处理 =====
 
+# 每批最大文件名数量
+BATCH_SIZE = 200
+
+
 async def process_batch_analysis(
     task_id: str, 
     filenames: List[str], 
     provider: str, 
     model: Optional[str]
 ):
-    """处理批量分析后台任务"""
+    """处理批量分析后台任务 - 每次发送最多200条文件名给AI"""
     task = analysis_tasks.get(task_id)
     if not task:
         return
@@ -90,26 +94,50 @@ async def process_batch_analysis(
     
     try:
         total = len(filenames)
-        for i, filename in enumerate(filenames):
-            # 检查任务是否被取消（暂不支持，但预留逻辑）
+        # 分批处理，每批最多 BATCH_SIZE 条
+        batch_count = (total + BATCH_SIZE - 1) // BATCH_SIZE
+        
+        for batch_idx in range(batch_count):
+            # 检查任务是否被取消
             if task.get("status") == "cancelled":
                 break
-                
+            
+            # 计算当前批次的范围
+            start_idx = batch_idx * BATCH_SIZE
+            end_idx = min(start_idx + BATCH_SIZE, total)
+            batch_filenames = filenames[start_idx:end_idx]
+            
             try:
-                # 调用 AI 分析
-                prompt = f"""
-                请分析以下小说文件名，提取书名、作者和额外信息。
-                文件名：{filename}
+                # 构建批量分析的 prompt
+                filenames_list = "\n".join([f"{i+1}. {fn}" for i, fn in enumerate(batch_filenames)])
                 
-                请返回 JSON 格式：
-                {{
-                    "title": "书名",
-                    "author": "作者(如果没有则为null)",
-                    "extra": "额外信息(如卷数、状态等，没有则为null)",
-                    "tags": ["标签1", "标签2"]
-                }}
-                只返回 JSON，不要其他内容。
-                """
+                prompt = f"""你是专业的小说文件名解析助手。分析文件名并提取书名、作者等元数据。只返回JSON格式数据。
+
+请分析以下 {len(batch_filenames)} 个小说文件名，为每个文件名提取书名、作者和额外信息。
+
+文件名列表：
+{filenames_list}
+
+请返回一个 JSON 数组，每个元素对应一个文件名的分析结果：
+```json
+[
+    {{
+        "index": 1,
+        "title": "书名",
+        "author": "作者(如果没有则为null)",
+        "extra": "额外信息如卷数、状态(没有则为null)",
+        "tags": ["标签1", "标签2"]
+    }},
+    ...
+]
+```
+
+重要要求：
+1. 必须返回 {len(batch_filenames)} 个结果，每个文件名一个
+2. index 必须与输入的序号对应（从1开始）
+3. 只返回 JSON 数组，不要其他内容
+4. 如果无法识别书名，使用原文件名（去掉扩展名）作为 title
+"""
                 
                 response = await ai_service.generate_completion(
                     prompt=prompt,
@@ -117,53 +145,90 @@ async def process_batch_analysis(
                     model=model
                 )
                 
-                # 解析 JSON
+                # 解析 JSON 数组
                 try:
-                    # 尝试找到 JSON 部分
-                    start = response.find('{')
-                    end = response.rfind('}') + 1
+                    # 尝试找到 JSON 数组部分
+                    start = response.find('[')
+                    end = response.rfind(']') + 1
                     if start >= 0 and end > start:
                         json_str = response[start:end]
-                        data = json.loads(json_str)
+                        batch_results = json.loads(json_str)
                         
+                        # 创建 index 到结果的映射
+                        result_map = {}
+                        for item in batch_results:
+                            idx = item.get("index", 0) - 1  # 转为0-based
+                            if 0 <= idx < len(batch_filenames):
+                                result_map[idx] = item
+                        
+                        # 按顺序添加结果
+                        for i, filename in enumerate(batch_filenames):
+                            if i in result_map:
+                                data = result_map[i]
+                                results.append({
+                                    "original": filename,
+                                    "title": data.get("title", filename),
+                                    "author": data.get("author"),
+                                    "extra": data.get("extra"),
+                                    "tags": data.get("tags", []),
+                                    "confidence": 0.85
+                                })
+                            else:
+                                # AI 没有返回该文件的结果，使用默认值
+                                results.append({
+                                    "original": filename,
+                                    "title": filename,
+                                    "author": None,
+                                    "extra": None,
+                                    "tags": [],
+                                    "confidence": 0.0,
+                                    "error": "AI未返回此文件的结果"
+                                })
+                    else:
+                        raise ValueError("AI响应中没有找到JSON数组")
+                        
+                except json.JSONDecodeError as e:
+                    log.error(f"解析 AI 响应失败 (批次 {batch_idx+1}): {e}")
+                    # 该批次全部标记为失败
+                    for filename in batch_filenames:
                         results.append({
                             "original": filename,
-                            "title": data.get("title", filename),
-                            "author": data.get("author"),
-                            "extra": data.get("extra"),
-                            "tags": data.get("tags", []),
-                            "confidence": 0.8
+                            "title": filename,
+                            "author": None,
+                            "tags": [],
+                            "confidence": 0.0,
+                            "error": f"JSON解析失败: {str(e)}"
                         })
-                    else:
-                        raise ValueError("无法解析 AI 响应")
-                except Exception as e:
-                    log.error(f"解析 AI 响应失败: {e}, 响应: {response}")
+                        
+            except Exception as e:
+                log.error(f"批次 {batch_idx+1} 分析失败: {e}")
+                # 该批次全部标记为失败
+                for filename in batch_filenames:
                     results.append({
                         "original": filename,
                         "title": filename,
+                        "author": None,
+                        "tags": [],
                         "confidence": 0.0,
                         "error": str(e)
                     })
-                    
-            except Exception as e:
-                log.error(f"分析文件名失败: {filename}, 错误: {e}")
-                results.append({
-                    "original": filename,
-                    "title": filename,
-                    "confidence": 0.0,
-                    "error": str(e)
-                })
             
             # 更新进度
-            task["processed"] = i + 1
-            task["progress"] = ((i + 1) / total) * 100
-            task["results"] = results  # 实时更新结果
+            task["processed"] = end_idx
+            task["progress"] = (end_idx / total) * 100
+            task["results"] = results
+            task["current_batch"] = batch_idx + 1
+            task["total_batches"] = batch_count
             
-            # 稍微延时，避免速率限制
-            await asyncio.sleep(0.1)
+            log.info(f"任务 {task_id}: 完成批次 {batch_idx + 1}/{batch_count}, 进度: {task['progress']:.1f}%")
+            
+            # 批次之间稍微延时，避免速率限制
+            if batch_idx < batch_count - 1:
+                await asyncio.sleep(1)
             
         task["status"] = "completed"
         task["completed_at"] = datetime.now()
+        log.info(f"任务 {task_id}: 全部完成，共 {len(results)} 个结果")
         
     except Exception as e:
         log.error(f"批量分析任务失败: {task_id}, 错误: {e}")
