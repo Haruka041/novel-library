@@ -43,6 +43,7 @@ interface ScanTask {
   skipped_books: number
   error_count: number
   error_message: string | null
+  error_details?: ScanErrorLog[] | null
   started_at: string | null
   completed_at: string | null
   created_at: string
@@ -1138,8 +1139,25 @@ export default function LibrariesTab() {
   const handleViewErrors = (task: ScanTask) => {
     setErrorDialogTask(task)
     
-    // 解析 error_message JSON
-    if (task.error_message) {
+    // 优先使用 error_details (API 2.0)
+    if (task.error_details && Array.isArray(task.error_details)) {
+      setParsedErrors(task.error_details)
+      // 如果还有 error_message 且不等于 error_details 的 JSON，则显示为主错误
+      if (task.error_message && !task.error_message.startsWith('[')) {
+        // 尝试解析看是否是主错误 JSON
+        try {
+          const data = JSON.parse(task.error_message)
+          if (data.main_error) setMainError(data.main_error)
+          else setMainError(null)
+        } catch {
+          setMainError(task.error_message)
+        }
+      } else {
+        setMainError(null)
+      }
+    }
+    // 兼容旧版：解析 error_message JSON
+    else if (task.error_message) {
       try {
         const data = JSON.parse(task.error_message)
         // 判断是任务失败（有 main_error）还是部分文件错误（数组）

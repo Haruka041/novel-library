@@ -56,6 +56,7 @@ class ScanTaskResponse(BaseModel):
     skipped_books: int
     error_count: int
     error_message: Optional[str]
+    error_details: Optional[List[dict]] = None
     started_at: Optional[datetime]
     completed_at: Optional[datetime]
     created_at: datetime
@@ -400,6 +401,8 @@ async def get_library_scan_tasks(
     if not library:
         raise HTTPException(status_code=404, detail="书库不存在")
     
+    import json
+    
     # 获取任务列表
     result = await db.execute(
         select(ScanTask)
@@ -409,7 +412,36 @@ async def get_library_scan_tasks(
     )
     tasks = result.scalars().all()
     
-    return tasks
+    # 手动处理 error_message 中的 JSON 数据
+    response = []
+    for task in tasks:
+        error_details = None
+        if task.error_message and task.error_message.startswith('[') or task.error_message.startswith('{'):
+            try:
+                error_details = json.loads(task.error_message)
+            except:
+                pass
+        
+        # 构建响应字典，然后转换为 Pydantic 模型
+        task_dict = {
+            "id": task.id,
+            "library_id": task.library_id,
+            "status": task.status,
+            "progress": task.progress,
+            "total_files": task.total_files,
+            "processed_files": task.processed_files,
+            "added_books": task.added_books,
+            "skipped_books": task.skipped_books,
+            "error_count": task.error_count,
+            "error_message": task.error_message,
+            "error_details": error_details if isinstance(error_details, list) else None,
+            "started_at": task.started_at,
+            "completed_at": task.completed_at,
+            "created_at": task.created_at
+        }
+        response.append(ScanTaskResponse(**task_dict))
+    
+    return response
 
 
 @router.post("/admin/scan-tasks/{task_id}/cancel")

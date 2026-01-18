@@ -6,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 import uuid
+import gc
+import traceback
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -76,11 +78,15 @@ class Scanner:
             "added": 0,
             "skipped": 0,
             "errors": 0,
+            "error_details": [],  # 存储详细错误信息
         }
         
         # 扫描所有文件
         files = self._discover_files(library_path)
         log.info(f"发现 {len(files)} 个文件")
+        
+        # 批处理计数器，用于触发GC
+        processed_count = 0
         
         for file_path in files:
             try:
@@ -91,10 +97,25 @@ class Scanner:
                     await self._process_archive(file_path, library_id, stats)
                 else:
                     await self._process_ebook(file_path, library_id, stats)
+                
+                processed_count += 1
+                # 每处理 50 个文件主动进行一次垃圾回收，防止内存持续增长
+                if processed_count % 50 == 0:
+                    gc.collect()
                     
             except Exception as e:
-                log.error(f"处理文件失败: {file_path}, 错误: {e}")
+                error_msg = f"{type(e).__name__}: {str(e)}"
+                log.error(f"处理文件失败: {file_path}, 错误: {error_msg}")
                 stats["errors"] += 1
+                stats["error_details"].append({
+                    "file": file_path.name,
+                    "path": str(file_path),
+                    "error": error_msg,
+                    "traceback": traceback.format_exc()
+                })
+        
+        # 扫描结束后进行一次彻底的垃圾回收
+        gc.collect()
         
         # 更新文件名规则统计信息
         await self.txt_parser.update_pattern_stats()
@@ -198,6 +219,11 @@ class Scanner:
         txt_content = None
         if file_path.suffix.lower() == '.txt':
             try:
+                # 检查文件大小，如果过大（>50MB），记录警告但仍处理（只读前部）
+                file_size = file_path.stat().st_size
+                if file_size > 50 * 1024 * 1024:
+                    log.warning(f"TXT文件较大 ({file_size / 1024 / 1024:.2f} MB): {file_path.name}")
+                
                 with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                     txt_content = f.read(5000)  # 只读前5000字，足够提取简介和标签
             except Exception as e:
