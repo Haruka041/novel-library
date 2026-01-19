@@ -223,9 +223,8 @@ class Scanner:
                 file_size = file_path.stat().st_size
                 if file_size > 50 * 1024 * 1024:
                     log.warning(f"TXT文件较大 ({file_size / 1024 / 1024:.2f} MB): {file_path.name}")
-                
-                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    txt_content = f.read(5000)  # 只读前5000字，足够提取简介和标签
+
+                txt_content = self.txt_parser.read_preview(file_path, max_chars=5000)
             except Exception as e:
                 log.error(f"读取TXT内容失败: {file_path}, 错误: {e}")
         

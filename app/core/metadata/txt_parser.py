@@ -86,9 +86,17 @@ class TxtParser:
             log.error(f"解析目录失败: {file_path}, 错误: {e}")
             return []
 
-    def _read_file_content(self, file_path: Path) -> Optional[str]:
+    def read_preview(self, file_path: Path, max_chars: int = 5000) -> Optional[str]:
+        """读取文件前N字符用于简介/标签提取"""
+        return self._read_file_content(file_path, max_chars=max_chars)
+
+    def _read_file_content(self, file_path: Path, max_chars: Optional[int] = None) -> Optional[str]:
         """读取文件内容（尝试多种编码）"""
         import chardet
+
+        if self._is_probably_binary_file(file_path):
+            log.warning(f"疑似二进制文件，跳过读取: {file_path.name}")
+            return None
         
         def decode_quality(text: str) -> float:
             if not text:
@@ -143,7 +151,7 @@ class TxtParser:
 
         try:
             with open(file_path, 'r', encoding=encoding, errors='replace') as f:
-                content = f.read()
+                content = f.read() if max_chars is None else f.read(max_chars)
             if decode_quality(content[:10000]) > 0.2:
                 log.warning(f"编码 {encoding} 读取质量较差: {file_path.name}")
             return self._clean_content(content)
@@ -158,6 +166,28 @@ class TxtParser:
         # 规范化换行
         content = re.sub(r'\r\n', '\n', content)
         return content
+
+    def _is_probably_binary_file(self, file_path: Path, sample_size: int = 8192) -> bool:
+        """根据文件头部字节判断是否为二进制文件"""
+        try:
+            with open(file_path, 'rb') as f:
+                sample = f.read(sample_size)
+        except Exception as e:
+            log.warning(f"读取文件样本失败: {file_path}, 错误: {e}")
+            return False
+
+        if not sample:
+            return False
+
+        if b'\x00' in sample:
+            return True
+
+        control_bytes = 0
+        for b in sample:
+            if b < 32 and b not in (9, 10, 13):
+                control_bytes += 1
+
+        return (control_bytes / len(sample)) > 0.1
 
     def _parse_chapters(self, content: str) -> List[Dict]:
         """解析章节列表"""

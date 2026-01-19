@@ -12,7 +12,7 @@ import {
   PlayArrow, Stop, CheckCircle, Error as ErrorIcon, Schedule,
   Folder, DeleteOutline, AddCircle, LocalOffer, Sync, Warning,
   Psychology, Code, Preview, MergeType, Search as SearchIcon,
-  AutoFixHigh
+  AutoFixHigh, Subject
 } from '@mui/icons-material'
 import api from '../../services/api'
 
@@ -169,7 +169,7 @@ export default function LibrariesTab() {
   // 提取任务状态（显示进度条）
   interface ExtractTask {
     libraryId: number
-    type: 'ai' | 'pattern'
+    type: 'ai' | 'pattern' | 'description'
     status: 'running' | 'completed' | 'failed'
     total: number
     applied: number
@@ -394,6 +394,72 @@ export default function LibrariesTab() {
       setExtractDialogOpen(false)
     } finally {
       setExtractLoading(false)
+    }
+  }
+
+  // 简介提取
+  const handleExtractDescriptions = async (libraryId: number) => {
+    const library = libraries.find(l => l.id === libraryId)
+    if (!confirm(`确定要为书库"${library?.name || libraryId}"提取TXT简介吗？\n\n默认仅补全空简介。`)) {
+      return
+    }
+
+    const useAi = confirm('是否使用AI辅助生成简介？\n\n确定=使用AI，取消=仅本地提取')
+
+    setExtractTasks(prev => ({
+      ...prev,
+      [libraryId]: {
+        libraryId,
+        type: 'description',
+        status: 'running',
+        total: 0,
+        applied: 0
+      }
+    }))
+
+    try {
+      const response = await api.post(`/api/admin/libraries/${libraryId}/extract-descriptions`, {
+        overwrite: false,
+        use_ai: useAi
+      })
+
+      const now = new Date().toISOString()
+      setExtractTasks(prev => ({
+        ...prev,
+        [libraryId]: {
+          libraryId,
+          type: 'description',
+          status: 'completed',
+          total: response.data.total_books,
+          applied: response.data.updated_count,
+          completedAt: now
+        }
+      }))
+      loadLibraries()
+
+      if (useAi && !response.data.ai_enabled) {
+        alert('AI未启用，已使用本地简介提取')
+      }
+
+      setTimeout(() => {
+        setExtractTasks(prev => {
+          const newTasks = { ...prev }
+          if (newTasks[libraryId]?.status === 'completed') {
+            delete newTasks[libraryId]
+          }
+          return newTasks
+        })
+      }, 5000)
+    } catch (err: any) {
+      setExtractTasks(prev => ({
+        ...prev,
+        [libraryId]: {
+          ...prev[libraryId],
+          status: 'failed',
+          error: err.response?.data?.detail || '提取简介失败'
+        }
+      }))
+      setError(err.response?.data?.detail || '提取简介失败')
     }
   }
   
@@ -1248,6 +1314,7 @@ export default function LibrariesTab() {
           
           const extractTask = extractTasks[library.id]
           const lastExtract = lastExtractTime[library.id]
+          const isDescriptionExtracting = extractTask?.status === 'running' && extractTask.type === 'description'
           
           return (
             <Grid item xs={12} key={library.id}>
@@ -1306,6 +1373,19 @@ export default function LibrariesTab() {
                         color="info"
                       >
                         <Code />
+                      </IconButton>
+                      <IconButton
+                        size="small"
+                        onClick={() => handleExtractDescriptions(library.id)}
+                        title="提取简介"
+                        color="info"
+                        disabled={isDescriptionExtracting}
+                      >
+                        {isDescriptionExtracting ? (
+                          <CircularProgress size={20} />
+                        ) : (
+                          <Subject />
+                        )}
                       </IconButton>
                       <IconButton
                         size="small"
@@ -1379,8 +1459,18 @@ export default function LibrariesTab() {
                     <Box sx={{ mt: 2 }}>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                         <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                          {extractTask.type === 'ai' ? <Psychology fontSize="small" /> : <Code fontSize="small" />}
-                          {extractTask.type === 'ai' ? 'AI提取' : '规则提取'}
+                          {extractTask.type === 'ai' ? (
+                            <Psychology fontSize="small" />
+                          ) : extractTask.type === 'pattern' ? (
+                            <Code fontSize="small" />
+                          ) : (
+                            <Subject fontSize="small" />
+                          )}
+                          {extractTask.type === 'ai'
+                            ? 'AI提取'
+                            : extractTask.type === 'pattern'
+                              ? '规则提取'
+                              : '简介提取'}
                           {extractTask.status === 'running' && '中...'}
                           {extractTask.status === 'completed' && ' 完成'}
                           {extractTask.status === 'failed' && ' 失败'}

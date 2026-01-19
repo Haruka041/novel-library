@@ -3,6 +3,7 @@
 包括文件名分析、规则管理、备份管理等
 """
 import json
+from pathlib import Path
 from typing import List, Optional
 from datetime import datetime
 
@@ -13,7 +14,9 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import FilenamePattern, Library, LibraryPermission, LibraryTag, Book, User, BookTag, Tag
+from app.models import FilenamePattern, Library, LibraryPermission, LibraryTag, Book, User, BookTag, Tag, BookVersion
+from app.core.ai import ai_config, get_ai_service
+from app.core.metadata.txt_parser import TxtParser
 from app.web.routes.auth import get_current_user
 from app.security import hash_password, decode_access_token
 from app.utils.filename_analyzer import FilenameAnalyzer
@@ -74,6 +77,14 @@ class AnalysisResult(BaseModel):
     analyzed_files: int
     patterns_found: dict
     suggested_patterns: List[dict]
+
+
+class DescriptionExtractRequest(BaseModel):
+    """简介提取请求"""
+    overwrite: bool = False
+    use_ai: bool = False
+    max_length: int = 500
+    max_chars: int = 5000
 
 
 # 权限检查装饰器
@@ -848,6 +859,106 @@ async def apply_library_content_rating_to_books(
         "library_name": library.name,
         "content_rating": content_rating,
         "updated_count": updated_count,
+    }
+
+
+@router.post("/admin/libraries/{library_id}/extract-descriptions")
+async def extract_library_descriptions(
+    library_id: int,
+    request: DescriptionExtractRequest,
+    current_user: User = Depends(admin_required),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    手动触发书库 TXT 简介提取
+    """
+    result = await db.execute(
+        select(Library).where(Library.id == library_id)
+    )
+    library = result.scalar_one_or_none()
+
+    if not library:
+        raise HTTPException(status_code=404, detail="书库不存在")
+
+    max_length = max(50, min(request.max_length, 1000))
+    max_chars = max(1000, min(request.max_chars, 20000))
+
+    txt_parser = TxtParser(db)
+    ai_service = None
+    ai_enabled = request.use_ai and ai_config.is_enabled()
+    if ai_enabled:
+        ai_service = get_ai_service()
+
+    query = (
+        select(Book, BookVersion)
+        .join(BookVersion)
+        .where(Book.library_id == library_id)
+        .where(BookVersion.file_format.in_(['.txt', 'txt']))
+        .order_by(Book.id, BookVersion.is_primary.desc())
+    )
+    rows = (await db.execute(query)).all()
+
+    seen_books = set()
+    total_books = 0
+    updated_count = 0
+    skipped_count = 0
+    failed_count = 0
+    ai_used = 0
+
+    for book, version in rows:
+        if book.id in seen_books:
+            continue
+        seen_books.add(book.id)
+        total_books += 1
+
+        if book.description and not request.overwrite:
+            skipped_count += 1
+            continue
+
+        file_path = Path(version.file_path)
+        if not file_path.exists():
+            failed_count += 1
+            log.warning(f"简介提取跳过（文件不存在）: {version.file_path}")
+            continue
+
+        content = txt_parser.read_preview(file_path, max_chars=max_chars)
+        if not content:
+            failed_count += 1
+            continue
+
+        description = txt_parser.extract_description(content, max_length=max_length)
+        if (not description or len(description) < 30) and ai_enabled and ai_service:
+            try:
+                ai_desc = await ai_service.generate_summary(content, max_length=max_length)
+            except Exception as e:
+                log.warning(f"AI简介生成失败: {file_path.name}, 错误: {e}")
+                ai_desc = None
+            if ai_desc:
+                description = ai_desc
+                ai_used += 1
+
+        if description:
+            book.description = description
+            updated_count += 1
+        else:
+            skipped_count += 1
+
+    await db.commit()
+
+    log.info(
+        f"管理员 {current_user.username} 提取书库 {library.name} 简介完成: "
+        f"总计 {total_books} 本, 更新 {updated_count} 本, 跳过 {skipped_count} 本, 失败 {failed_count} 本"
+    )
+
+    return {
+        "library_id": library_id,
+        "library_name": library.name,
+        "total_books": total_books,
+        "updated_count": updated_count,
+        "skipped_count": skipped_count,
+        "failed_count": failed_count,
+        "ai_used": ai_used,
+        "ai_enabled": ai_enabled
     }
 
 
