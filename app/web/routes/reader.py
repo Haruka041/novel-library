@@ -86,6 +86,13 @@ async def get_book_toc(
         
         if content is None:
             if file_format in ['mobi', '.mobi', 'azw3', '.azw3']:
+                converted_path = get_cached_conversion_path(file_path, "epub")
+                if converted_path:
+                    return {
+                        "format": "epub",
+                        "message": "MOBI/AZW3解析失败，已存在转换EPUB",
+                        "output_url": f"/api/books/{book.id}/converted?format=epub"
+                    }
                 raise HTTPException(status_code=422, detail="MOBI/AZW3解析失败，建议转换为EPUB")
             raise HTTPException(status_code=500, detail="无法读取文件内容")
         

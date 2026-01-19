@@ -914,6 +914,9 @@ export default function ReaderPage() {
         setChapters(data.chapters || [])
         setTotalLength(data.totalLength || 0)
         setTotalChapters(data.chapters?.length || 0)
+      } else if (data.format === 'epub' && data.output_url) {
+        await openConvertedEpub(data.output_url)
+        return false
       } else if (data.format === 'comic') {
         setComicImages(data.images || [])
         setTotalChapters(data.totalImages || 0)
