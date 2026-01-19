@@ -1113,21 +1113,20 @@ async def batch_analyze_library_with_ai(
         
         try:
             filenames_list = "\n".join([f"{j+1}. {fn}" for j, fn in enumerate(batch)])
-            prompt = f"""分析以下小说文件名，提取书名和作者。同时，如果发现多个文件名有相同的命名模式，请总结出正则表达式规则。
+            prompt = f"""分析以下文件名，提取书名和作者，并总结规则，仅输出 JSON。
 
 文件名列表：
 {filenames_list}
 
-请返回JSON格式：
-{{
-    "recognized": [
-        {{"index": 1, "filename": "文件名", "title": "书名", "author": "作者或null", "review": "点评或null"}}
-    ],
-    "patterns": [
-        {{"name": "规则名", "regex": "正则表达式", "title_group": 1, "author_group": 2, "match_count": 10}}
-    ]
-}}
-只返回JSON。"""
+要求:
+1) 仅输出 JSON，不要解释，不要 Markdown。
+2) 不确定的字段写 null。
+3) regex 兼容 Python re。
+
+输出格式（严格一致）:
+BEGIN_JSON
+{{"recognized":[{{"index":1,"filename":"","title":"","author":null,"review":null}}],"patterns":[{{"name":"","regex":"","title_group":1,"author_group":2,"match_count":0}}]}}
+END_JSON"""
 
             messages = [
                 {"role": "system", "content": "你是专业的小说文件名分析助手。"},
@@ -1136,11 +1135,8 @@ async def batch_analyze_library_with_ai(
             
             response = await ai_service.chat(messages=messages)
             if response.success:
-                content = response.content
-                start = content.find('{')
-                end = content.rfind('}') + 1
-                if start >= 0 and end > start:
-                    data = json.loads(content[start:end])
+                data = ai_service._extract_json_block(response.content)
+                if data:
                     
                     # 收集识别结果
                     for item in data.get("recognized", []):

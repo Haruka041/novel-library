@@ -24,6 +24,34 @@ class AIService:
     
     def __init__(self):
         self.config = ai_config
+
+    def _extract_json_block(self, content: str) -> Optional[dict]:
+        text = (content or "").strip()
+        if not text:
+            return None
+
+        if "BEGIN_JSON" in text and "END_JSON" in text:
+            text = text.split("BEGIN_JSON", 1)[1].split("END_JSON", 1)[0].strip()
+
+        if text.startswith('```'):
+            parts = text.split('```')
+            if len(parts) >= 2:
+                text = parts[1].strip()
+                if text.startswith('json'):
+                    text = text[4:].strip()
+
+        start = text.find('{')
+        end = text.rfind('}')
+        if start >= 0 and end > start:
+            text = text[start:end + 1]
+        else:
+            return None
+
+        try:
+            import json
+            return json.loads(text)
+        except Exception:
+            return None
     
     async def _call_openai(self, messages: List[Dict[str, str]], **kwargs) -> AIResponse:
         """调用OpenAI API"""
@@ -215,19 +243,20 @@ class AIService:
         if not self.config.features.metadata_enhancement:
             return {}
         
-        prompt = f"""请从以下信息中提取书籍元数据。返回JSON格式。
+        prompt = f"""从下列信息提取书籍元数据，仅输出 JSON。
 
 文件名: {filename}
 内容预览: {content_preview[:500] if content_preview else '无'}
 
-请提取以下信息（如果无法确定请返回null）：
-- title: 书名
-- author: 作者
-- description: 简介（根据内容生成，不超过200字）
-- genre: 类型（如：玄幻、都市、言情、科幻等）
-- tags: 标签数组
+要求:
+1) 仅输出 JSON，不要解释，不要 Markdown。
+2) 不确定的字段写 null。
+3) description 最多 200 字。
 
-返回纯JSON，不要有其他文字："""
+输出格式（严格一致）:
+BEGIN_JSON
+{{"title":"","author":null,"description":null,"genre":null,"tags":[]}}
+END_JSON"""
         
         response = await self.chat([
             {"role": "system", "content": "你是一个专业的书籍元数据提取助手。只返回JSON格式数据。"},
@@ -238,19 +267,11 @@ class AIService:
             log.warning(f"AI元数据提取失败: {response.error}")
             return {}
         
-        try:
-            import json
-            # 尝试提取JSON
-            content = response.content.strip()
-            if content.startswith('```'):
-                content = content.split('```')[1]
-                if content.startswith('json'):
-                    content = content[4:]
-            
-            return json.loads(content)
-        except Exception as e:
-            log.warning(f"解析AI响应失败: {e}")
+        result = self._extract_json_block(response.content)
+        if result is None:
+            log.warning("解析AI响应失败: JSON格式不正确")
             return {}
+        return result
     
     async def generate_summary(self, content: str, max_length: int = 200) -> Optional[str]:
         """
@@ -298,21 +319,19 @@ class AIService:
         if not self.config.features.smart_classification:
             return {}
         
-        prompt = f"""请对以下书籍进行分类。
+        prompt = f"""为下列书籍给出分类，仅输出 JSON。
 
 书名: {title}
 内容预览: {content_preview[:500] if content_preview else '无'}
 
-请返回JSON格式：
-{{
-    "genre": "主要类型（玄幻/都市/言情/科幻/历史/武侠/悬疑等）",
-    "sub_genre": "子类型",
-    "tags": ["标签1", "标签2", "标签3"],
-    "age_rating": "年龄分级（general/teen/adult）",
-    "confidence": 0.8
-}}
+要求:
+1) 仅输出 JSON，不要解释，不要 Markdown。
+2) 不确定的字段写 null。
 
-返回纯JSON："""
+输出格式（严格一致）:
+BEGIN_JSON
+{{"genre":"","sub_genre":null,"tags":[],"age_rating":"general","confidence":0.5}}
+END_JSON"""
         
         response = await self.chat([
             {"role": "system", "content": "你是一个专业的书籍分类助手。只返回JSON格式数据。"},
@@ -322,17 +341,11 @@ class AIService:
         if not response.success:
             return {}
         
-        try:
-            import json
-            content = response.content.strip()
-            if content.startswith('```'):
-                content = content.split('```')[1]
-                if content.startswith('json'):
-                    content = content[4:]
-            return json.loads(content)
-        except Exception as e:
-            log.warning(f"解析AI分类响应失败: {e}")
+        result = self._extract_json_block(response.content)
+        if result is None:
+            log.warning("解析AI分类响应失败: JSON格式不正确")
             return {}
+        return result
     
     async def test_connection(self) -> AIResponse:
         """
@@ -405,15 +418,20 @@ class AIService:
         filename_list = "\n".join([f"- {fn}" for fn in truncated_samples])
         
         # 简化prompt，减少token消耗
-        prompt = f"""分析以下{len(samples)}个小说文件名（已去除后缀），生成正则表达式规则。
+        prompt = f"""分析以下{len(samples)}个小说文件名（已去除后缀），生成解析规则。
 
 文件名：
 {filename_list}
 
-返回JSON（不要markdown代码块）：
-{{"patterns":[{{"name":"规则名","regex":"正则","title_group":1,"author_group":2}}],"analysis":"分析"}}
+要求:
+1) 仅输出 JSON，不要解释，不要 Markdown。
+2) regex 兼容 Python re。
+3) title_group=书名组，author_group=作者组。
 
-要求：正则兼容Python re模块，捕获组1=书名，2=作者。正则不需要匹配文件后缀。"""
+输出格式（严格一致）:
+BEGIN_JSON
+{{"patterns":[{{"name":"","regex":"","title_group":1,"author_group":2}}],"analysis":""}}
+END_JSON"""
         
         response = await self.chat([
             {"role": "system", "content": "只返回纯JSON，不要任何解释或markdown。"},
@@ -423,21 +441,12 @@ class AIService:
         if not response.success:
             return {"success": False, "error": response.error}
         
-        try:
-            import json
-            content = response.content.strip()
-            # 提取JSON
-            if content.startswith('```'):
-                content = content.split('```')[1]
-                if content.startswith('json'):
-                    content = content[4:]
-            
-            result = json.loads(content)
-            result["success"] = True
-            return result
-        except Exception as e:
-            log.warning(f"解析AI响应失败: {e}")
-            return {"success": False, "error": f"解析响应失败: {str(e)}", "raw": response.content}
+        result = self._extract_json_block(response.content)
+        if result is None:
+            log.warning("解析AI响应失败: JSON格式不正确")
+            return {"success": False, "error": "解析响应失败: JSON格式不正确", "raw": response.content}
+        result["success"] = True
+        return result
     
     async def batch_analyze_filenames(
         self, 
@@ -481,51 +490,20 @@ class AIService:
             # 构建文件名列表
             filename_list = "\n".join([f"{i+1}. {fn}" for i, fn in enumerate(batch)])
             
-            prompt = f"""请分析以下{len(batch)}个小说文件名，为每个文件名提取元数据。
+            prompt = f"""分析以下{len(batch)}个小说文件名，提取元数据并总结规则。
 
 文件名列表：
 {filename_list}
 
-请为每个文件名提取：
-1. 书名（title）
-2. 作者（author，无则null）
-3. 额外信息（extra，如系列名、卷数、版本、点评/推荐评价等）
-4. 如果额外信息包含点评或推书评价（如"强推"、"神作"、"必看"、描述性评价等），标记 has_review: true
+要求:
+1) 仅输出 JSON，不要解释，不要 Markdown。
+2) 无法确定写 null。
+3) patterns.regex 需兼容 Python re。
 
-同时，基于这批文件名，总结出通用的解析规则（正则表达式）。
-
-返回JSON格式：
-{{
-    "books": [
-        {{
-            "filename": "原文件名",
-            "title": "书名",
-            "author": "作者或null",
-            "extra": "额外信息或null",
-            "has_review": false,
-            "review_text": "如果有点评，提取点评内容"
-        }}
-    ],
-    "patterns": [
-        {{
-            "name": "规则名称",
-            "regex": "正则表达式",
-            "title_group": 1,
-            "author_group": 2,
-            "extra_group": 0,
-            "tag_group": 0,
-            "match_count": 10
-        }}
-    ],
-    "batch_summary": "本批次分析总结"
-}}
-
-注意：
-1. 正则表达式需兼容Python re模块
-2. 尽量精确提取，无法识别的字段返回null
-3. 点评/评价通常出现在文件名末尾或括号内
-
-返回纯JSON："""
+输出格式（严格一致）:
+BEGIN_JSON
+{{"books":[{{"filename":"","title":"","author":null,"extra":null,"has_review":false,"review_text":null}}],"patterns":[{{"name":"","regex":"","title_group":1,"author_group":2,"extra_group":0,"tag_group":0,"match_count":0}}],"batch_summary":""}}
+END_JSON"""
             
             response = await self.chat([
                 {"role": "system", "content": "你是专业的小说文件名解析助手。分析文件名并提取书名、作者等元数据。只返回JSON格式数据。"},
@@ -548,13 +526,9 @@ class AIService:
                     continue
             
             try:
-                content = response.content.strip()
-                if content.startswith('```'):
-                    content = content.split('```')[1]
-                    if content.startswith('json'):
-                        content = content[4:]
-                
-                batch_result = json.loads(content)
+                batch_result = self._extract_json_block(response.content)
+                if batch_result is None:
+                    raise ValueError("JSON格式不正确")
                 
                 # 收集结果
                 if "books" in batch_result:
@@ -607,32 +581,20 @@ class AIService:
         if existing_patterns:
             existing_info = "\n现有规则：\n" + "\n".join([f"- {p.get('name', '')}: {p.get('regex', '')}" for p in existing_patterns[:5]])
         
-        prompt = f"""请为以下文件名生成解析规则：
+        prompt = f"""为以下文件名生成解析规则，仅输出 JSON。
 
 文件名: {filename}
 {existing_info}
 
-请识别并提取：
-1. 书名
-2. 作者名（如果有）
-3. 额外信息（如系列名、卷数、版本等）
+要求:
+1) 仅输出 JSON，不要解释，不要 Markdown。
+2) 不确定的字段写 null。
+3) regex 兼容 Python re。
 
-返回JSON格式：
-{{
-    "title": "提取的书名",
-    "author": "提取的作者名（无则null）",
-    "extra": "提取的额外信息（无则null）",
-    "pattern": {{
-        "name": "规则名称",
-        "regex": "正则表达式",
-        "title_group": 1,
-        "author_group": 2,
-        "extra_group": 0
-    }},
-    "confidence": 0.9
-}}
-
-返回纯JSON："""
+输出格式（严格一致）:
+BEGIN_JSON
+{{"title":"","author":null,"extra":null,"pattern":{{"name":"","regex":"","title_group":1,"author_group":2,"extra_group":0}},"confidence":0.5}}
+END_JSON"""
         
         response = await self.chat([
             {"role": "system", "content": "你是一个专业的文件名解析助手。只返回JSON格式数据。"},
@@ -642,20 +604,12 @@ class AIService:
         if not response.success:
             return {"success": False, "error": response.error}
         
-        try:
-            import json
-            content = response.content.strip()
-            if content.startswith('```'):
-                content = content.split('```')[1]
-                if content.startswith('json'):
-                    content = content[4:]
-            
-            result = json.loads(content)
-            result["success"] = True
-            return result
-        except Exception as e:
-            log.warning(f"解析AI响应失败: {e}")
-            return {"success": False, "error": f"解析响应失败: {str(e)}"}
+        result = self._extract_json_block(response.content)
+        if result is None:
+            log.warning("解析AI响应失败: JSON格式不正确")
+            return {"success": False, "error": "解析响应失败: JSON格式不正确"}
+        result["success"] = True
+        return result
 
 
 # 全局单例
