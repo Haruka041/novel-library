@@ -5,7 +5,7 @@
 import os
 from pathlib import Path
 from typing import Optional
-from concurrent.futures import ProcessPoolExecutor
+import multiprocessing
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Header, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
@@ -29,7 +29,6 @@ router = APIRouter()
 # 实例化全局解析器
 txt_parser = TxtParser()
 mobi_parser = MobiParser()
-mobi_process_pool = ProcessPoolExecutor(max_workers=1)
 
 # 大文件阈值：500KB
 LARGE_FILE_THRESHOLD = 500 * 1024
@@ -40,6 +39,8 @@ CHARS_PER_PAGE = 50000
 MOBI_MAX_TEXT_CHARS = 5_000_000
 MOBI_MAX_FILE_BYTES = 200 * 1024 * 1024
 MOBI_MAX_HTML_BYTES = 2 * 1024 * 1024
+MOBI_EXTRACT_TIMEOUT_SECONDS = 30
+MOBI_EXTRACT_MEMORY_LIMIT_MB = 512
 
 
 @router.get("/books/{book_id}/toc")
@@ -211,6 +212,12 @@ async def _get_mobi_text(file_path: Path) -> Optional[str]:
         cache_filename = hashlib.md5(file_hash_str.encode()).hexdigest() + ".txt"
         cache_path = cache_dir / cache_filename
         
+        # 检查失败标记，避免反复触发崩溃
+        fail_marker = cache_dir / f"{cache_filename}.fail"
+        if fail_marker.exists():
+            log.warning(f"MOBI提取已标记失败，跳过: {file_path.name}")
+            return None
+
         # 检查缓存
         if cache_path.exists():
             log.debug(f"使用MOBI文本缓存: {file_path.name}")
@@ -224,17 +231,10 @@ async def _get_mobi_text(file_path: Path) -> Optional[str]:
             
         # 提取文本
         log.info(f"提取MOBI文本: {file_path.name}")
-        # 在子进程中运行提取，避免异常文件导致主进程崩溃
+        # 在独立子进程中运行提取，避免异常文件导致主进程崩溃
         import asyncio
         loop = asyncio.get_event_loop()
-        content = await loop.run_in_executor(
-            mobi_process_pool,
-            extract_text_in_subprocess,
-            str(file_path),
-            MOBI_MAX_TEXT_CHARS,
-            MOBI_MAX_FILE_BYTES,
-            MOBI_MAX_HTML_BYTES
-        )
+        content = await loop.run_in_executor(None, _extract_mobi_with_limits, file_path)
         
         if content and content.strip():
             # 清理内容
@@ -242,15 +242,86 @@ async def _get_mobi_text(file_path: Path) -> Optional[str]:
             # 写入缓存
             with open(cache_path, 'w', encoding='utf-8') as f:
                 f.write(content)
+            if fail_marker.exists():
+                try:
+                    fail_marker.unlink()
+                except Exception:
+                    pass
             log.info(f"MOBI文本提取成功并缓存: {file_path.name}, {len(content)} 字符")
             return content
         else:
             log.error(f"MOBI文本提取结果为空: {file_path.name}")
+            try:
+                fail_marker.touch(exist_ok=True)
+            except Exception:
+                pass
             return None
             
     except Exception as e:
         log.error(f"获取MOBI文本失败: {file_path}, 错误: {e}", exc_info=True)
+        try:
+            cache_dir = Path(settings.directories.data) / "cache" / "mobi_txt"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            file_stat = file_path.stat()
+            file_hash_str = f"{file_path.name}_{file_stat.st_size}_{file_stat.st_mtime}"
+            cache_filename = hashlib.md5(file_hash_str.encode()).hexdigest() + ".txt"
+            fail_marker = cache_dir / f"{cache_filename}.fail"
+            fail_marker.touch(exist_ok=True)
+        except Exception:
+            pass
         return None
+
+
+def _mobi_extract_worker(path: str, queue: "multiprocessing.Queue"):
+    try:
+        import resource
+        if MOBI_EXTRACT_MEMORY_LIMIT_MB:
+            limit = MOBI_EXTRACT_MEMORY_LIMIT_MB * 1024 * 1024
+            resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+        resource.setrlimit(resource.RLIMIT_CPU, (MOBI_EXTRACT_TIMEOUT_SECONDS, MOBI_EXTRACT_TIMEOUT_SECONDS))
+    except Exception:
+        pass
+
+    try:
+        content = extract_text_in_subprocess(
+            path,
+            MOBI_MAX_TEXT_CHARS,
+            MOBI_MAX_FILE_BYTES,
+            MOBI_MAX_HTML_BYTES
+        )
+        queue.put({"ok": True, "content": content})
+    except Exception as e:
+        queue.put({"ok": False, "error": str(e)})
+
+
+def _extract_mobi_with_limits(file_path: Path) -> Optional[str]:
+    """带超时/内存限制的 MOBI 提取（同步）"""
+    ctx = multiprocessing.get_context("spawn")
+    result_queue: multiprocessing.Queue = ctx.Queue(maxsize=1)
+
+    process = ctx.Process(
+        target=_mobi_extract_worker,
+        args=(str(file_path), result_queue),
+        daemon=True
+    )
+    process.start()
+    process.join(MOBI_EXTRACT_TIMEOUT_SECONDS)
+
+    if process.is_alive():
+        process.terminate()
+        process.join(2)
+        log.warning(f"MOBI提取超时已终止: {file_path.name}")
+        return None
+
+    if result_queue.empty():
+        log.warning(f"MOBI提取无结果: {file_path.name}")
+        return None
+
+    result = result_queue.get()
+    if result.get("ok"):
+        return result.get("content")
+    log.warning(f"MOBI提取失败: {file_path.name}, 错误: {result.get('error')}")
+    return None
 
 
 async def _read_txt_file(file_path: Path) -> Optional[str]:
