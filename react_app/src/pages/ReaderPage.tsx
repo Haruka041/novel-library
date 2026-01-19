@@ -1206,14 +1206,31 @@ export default function ReaderPage() {
     }
   }
 
+  const getStoredToken = () => {
+    try {
+      const storage = localStorage.getItem('auth-storage')
+      if (!storage) return null
+      const parsed = JSON.parse(storage)
+      return parsed.state?.token || null
+    } catch (err) {
+      console.error('读取本地 token 失败:', err)
+      return null
+    }
+  }
+
   const loadEpub = async (customUrl?: string) => {
     try {
       const epubUrl = customUrl || `/api/books/${id}/content`
+      const headerToken = token || getStoredToken()
+      const requestHeaders = headerToken ? { 'Authorization': `Bearer ${headerToken}` } : undefined
       
       const book = ePub(epubUrl, {
-        requestHeaders: {
-          'Authorization': `Bearer ${token}`
-        }
+        requestHeaders
+      })
+
+      book.on('openFailed', (err: any) => {
+        console.error('EPUB 打开失败:', err)
+        setError('EPUB 加载失败')
       })
       
       setEpubBook(book)
