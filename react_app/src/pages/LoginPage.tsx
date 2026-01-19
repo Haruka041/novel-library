@@ -20,6 +20,7 @@ import {
   MenuBook,
 } from '@mui/icons-material'
 import { useAuthStore } from '../stores/authStore'
+import { useSettingsStore } from '../stores/settingsStore'
 
 export default function LoginPage() {
   const navigate = useNavigate()
@@ -27,6 +28,7 @@ export default function LoginPage() {
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
   
   const { login, isAuthenticated, checkAuth } = useAuthStore()
+  const { registrationEnabled, serverSettingsLoaded, loadServerSettings } = useSettingsStore()
   
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -38,6 +40,10 @@ export default function LoginPage() {
   useEffect(() => {
     checkAuth()
   }, [checkAuth])
+
+  useEffect(() => {
+    loadServerSettings()
+  }, [loadServerSettings])
 
   // 已登录则跳转
   useEffect(() => {
@@ -207,7 +213,16 @@ export default function LoginPage() {
               mt: 3,
             }}
           >
-            请使用管理员提供的账号登录
+            {serverSettingsLoaded && registrationEnabled ? (
+              <>
+                还没有账号？
+                <Button size="small" onClick={() => navigate('/register')} sx={{ ml: 1 }}>
+                  去注册
+                </Button>
+              </>
+            ) : (
+              '请使用管理员提供的账号登录'
+            )}
           </Typography>
         </CardContent>
       </Card>

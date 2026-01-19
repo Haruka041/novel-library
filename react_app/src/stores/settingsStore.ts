@@ -28,6 +28,7 @@ interface SettingsState {
   serverName: string
   serverDescription: string
   welcomeMessage: string
+  registrationEnabled: boolean
   serverSettingsLoaded: boolean
   loadServerSettings: () => Promise<void>
 }
@@ -49,6 +50,7 @@ export const useSettingsStore = create<SettingsState>()(
       serverName: '小说书库',
       serverDescription: '个人小说管理系统',
       welcomeMessage: '欢迎使用小说书库',
+      registrationEnabled: false,
       serverSettingsLoaded: false,
       
       setCoverSize: (size) => set({ coverSize: size }),
@@ -67,6 +69,7 @@ export const useSettingsStore = create<SettingsState>()(
             serverName: data.server_name || '小说书库',
             serverDescription: data.server_description || '',
             welcomeMessage: data.welcome_message || '',
+            registrationEnabled: Boolean(data.registration_enabled),
             serverSettingsLoaded: true,
           })
         } catch (error) {

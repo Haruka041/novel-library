@@ -4,6 +4,8 @@
 """
 from datetime import datetime, timedelta
 from typing import Optional
+import json
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -13,13 +15,29 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import User
-from app.security import create_access_token, decode_access_token, verify_password
+from app.security import create_access_token, decode_access_token, verify_password, hash_password
 from app.utils.logger import log
+from app.config import settings
 
 router = APIRouter()
 
 # OAuth2密码流
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
+
+SETTINGS_FILE = Path("config/system_settings.json")
+DEFAULT_REGISTRATION_ENABLED = False
+
+
+def _is_registration_enabled() -> bool:
+    if SETTINGS_FILE.exists():
+        try:
+            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return bool(data.get("registration_enabled", DEFAULT_REGISTRATION_ENABLED))
+        except Exception as e:
+            log.warning(f"读取系统设置失败，默认禁用注册: {e}")
+            return DEFAULT_REGISTRATION_ENABLED
+    return DEFAULT_REGISTRATION_ENABLED
 
 
 class Token(BaseModel):
@@ -134,6 +152,19 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class RegisterRequest(BaseModel):
+    """注册请求模型"""
+    username: str
+    password: str
+
+
+class RegisterResponse(BaseModel):
+    """注册响应模型（包含用户信息）"""
+    access_token: str
+    token_type: str
+    user: dict
+
+
 @router.post("/login", response_model=LoginResponse)
 async def login_json(
     login_data: LoginRequest,
@@ -161,6 +192,56 @@ async def login_json(
     
     log.info(f"用户登录: {user.username}")
     
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "is_admin": user.is_admin,
+        }
+    }
+
+
+@router.post("/register", response_model=RegisterResponse)
+async def register_user(
+    register_data: RegisterRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    用户注册（JSON格式）
+    """
+    if not _is_registration_enabled():
+        raise HTTPException(status_code=403, detail="当前未开启注册")
+
+    username = register_data.username.strip()
+    password = register_data.password
+
+    if len(username) < 3 or len(username) > 30:
+        raise HTTPException(status_code=400, detail="用户名长度需在3-30之间")
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="密码长度至少6位")
+
+    result = await db.execute(
+        select(User).where(User.username == username)
+    )
+    if result.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="用户名已存在")
+
+    user = User(
+        username=username,
+        password_hash=hash_password(password),
+        is_admin=False,
+        age_rating_limit=settings.rbac.default_age_rating,
+    )
+
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+
+    access_token = create_access_token(data={"sub": user.username})
+    log.info(f"新用户注册: {user.username}")
+
     return {
         "access_token": access_token,
         "token_type": "bearer",

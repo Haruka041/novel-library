@@ -6,6 +6,7 @@ import { useThemeStore } from './stores/themeStore'
 import { wsService } from './services/ws'
 import MainLayout from './layouts/MainLayout'
 import LoginPage from './pages/LoginPage'
+import RegisterPage from './pages/RegisterPage'
 import DashboardPage from './pages/DashboardPage'
 import LibraryPage from './pages/LibraryPage'
 import BookDetailPage from './pages/BookDetailPage'
@@ -95,6 +96,7 @@ function App() {
       <Routes>
         {/* 公开路由 */}
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
 
         {/* 需要认证的路由 */}
         <Route element={<PrivateRoute><MainLayout /></PrivateRoute>}>
