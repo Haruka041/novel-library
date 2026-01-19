@@ -1909,106 +1909,118 @@ export default function ReaderPage() {
           transition: 'transform 0.3s ease'
         }}
       >
-        <Toolbar>
-          <IconButton edge="start" color="inherit" onClick={(e) => {
-            e.stopPropagation()
-            if (currentChapter >= 0 && id && !isEpub) {
-              saveProgress()
-            }
-            navigate(-1)
-          }}>
-            <ArrowBack />
-          </IconButton>
-          <Typography variant="subtitle1" noWrap sx={{ flex: 1, ml: 1 }}>
-            {bookInfo?.title}
-          </Typography>
-          
-          <Chip 
-            icon={<Timer sx={{ fontSize: 16 }} />} 
-            label={formatReadingTime()} 
-            size="small" 
-            sx={{ mr: 1, color: 'white', bgcolor: 'rgba(255,255,255,0.1)' }}
-          />
-          
-          {!isEpub && (
-            <IconButton color="inherit" onClick={(e) => { e.stopPropagation(); setAutoScroll(!autoScroll) }}>
-              {autoScroll ? <Stop /> : <PlayArrow />}
+        <Toolbar
+          sx={{
+            overflowX: 'auto',
+            WebkitOverflowScrolling: 'touch',
+            '&::-webkit-scrollbar': { display: 'none' },
+          }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 'max-content', pr: 1 }}>
+            <IconButton edge="start" color="inherit" onClick={(e) => {
+              e.stopPropagation()
+              if (currentChapter >= 0 && id && !isEpub) {
+                saveProgress()
+              }
+              navigate(-1)
+            }}>
+              <ArrowBack />
             </IconButton>
-          )}
-          
-          <IconButton color="inherit" onClick={(e) => { e.stopPropagation(); toggleFullscreen() }}>
-            {isFullscreen ? <FullscreenExit /> : <Fullscreen />}
-          </IconButton>
-          
-          {/* 书签按钮 */}
-          {!isEpub && (
-            <IconButton 
-              color="inherit" 
-              onClick={(e) => { 
-                e.stopPropagation()
-                if (hasBookmarkAtCurrentPosition()) {
-                  // 已有书签，打开书签列表
-                  loadBookmarks()
-                  setBookmarksOpen(true)
-                } else {
-                  // 添加书签
-                  addBookmark()
-                }
-              }}
+            <Typography
+              variant="subtitle1"
+              noWrap
+              sx={{ ml: 1, maxWidth: isMobile ? 140 : 320 }}
             >
-              {hasBookmarkAtCurrentPosition() ? <Bookmark /> : <BookmarkBorder />}
+              {bookInfo?.title}
+            </Typography>
+            
+            <Chip 
+              icon={<Timer sx={{ fontSize: 16 }} />} 
+              label={formatReadingTime()} 
+              size="small" 
+              sx={{ mr: 1, color: 'white', bgcolor: 'rgba(255,255,255,0.1)', display: isMobile ? 'none' : 'inline-flex' }}
+            />
+            
+            {!isEpub && (
+              <IconButton color="inherit" onClick={(e) => { e.stopPropagation(); setAutoScroll(!autoScroll) }}>
+                {autoScroll ? <Stop /> : <PlayArrow />}
+              </IconButton>
+            )}
+            
+            <IconButton color="inherit" onClick={(e) => { e.stopPropagation(); toggleFullscreen() }}>
+              {isFullscreen ? <FullscreenExit /> : <Fullscreen />}
             </IconButton>
-          )}
-          
-          {/* 搜索按钮 (仅TXT) */}
-          {!isEpub && (
-            <IconButton color="inherit" onClick={(e) => { e.stopPropagation(); setSearchOpen(true) }}>
-              <Search />
-            </IconButton>
-          )}
-          
-          {/* 批注按钮 (仅TXT) */}
-          {!isEpub && format === 'txt' && (
-            <IconButton 
-              color="inherit" 
-              onClick={(e) => { 
-                e.stopPropagation()
-                loadAnnotations()
-                setAnnotationsOpen(true) 
-              }}
-            >
-              <Edit />
-            </IconButton>
-          )}
+            
+            {/* 书签按钮 */}
+            {!isEpub && (
+              <IconButton 
+                color="inherit" 
+                onClick={(e) => { 
+                  e.stopPropagation()
+                  if (hasBookmarkAtCurrentPosition()) {
+                    // 已有书签，打开书签列表
+                    loadBookmarks()
+                    setBookmarksOpen(true)
+                  } else {
+                    // 添加书签
+                    addBookmark()
+                  }
+                }}
+              >
+                {hasBookmarkAtCurrentPosition() ? <Bookmark /> : <BookmarkBorder />}
+              </IconButton>
+            )}
+            
+            {/* 搜索按钮 (仅TXT) */}
+            {!isEpub && (
+              <IconButton color="inherit" onClick={(e) => { e.stopPropagation(); setSearchOpen(true) }}>
+                <Search />
+              </IconButton>
+            )}
+            
+            {/* 批注按钮 (仅TXT) */}
+            {!isEpub && format === 'txt' && (
+              <IconButton 
+                color="inherit" 
+                onClick={(e) => { 
+                  e.stopPropagation()
+                  loadAnnotations()
+                  setAnnotationsOpen(true) 
+                }}
+              >
+                <Edit />
+              </IconButton>
+            )}
 
-          {/* 缩放按钮 (PDF/漫画) */}
-          {(format === 'pdf' || format === 'comic') && (
-            <>
-              <IconButton color="inherit" onClick={(e) => { e.stopPropagation(); handleZoomOut() }}>
-                <ZoomOut />
-              </IconButton>
-              <Typography variant="caption" sx={{ mx: 0.5, minWidth: 32, textAlign: 'center' }}>
-                {Math.round(scale * 100)}%
-              </Typography>
-              <IconButton color="inherit" onClick={(e) => { e.stopPropagation(); handleZoomIn() }}>
-                <ZoomIn />
-              </IconButton>
-            </>
-          )}
-          
-          <IconButton color="inherit" onClick={(e) => { e.stopPropagation(); setTocOpen(true) }}>
-            <Menu />
-          </IconButton>
-          <IconButton color="inherit" onClick={(e) => { 
-            e.stopPropagation()
-            loadBookmarks()
-            setBookmarksOpen(true)
-          }}>
-            <Bookmark />
-          </IconButton>
-          <IconButton color="inherit" onClick={(e) => { e.stopPropagation(); setSettingsOpen(true) }}>
-            <Settings />
-          </IconButton>
+            {/* 缩放按钮 (PDF/漫画) */}
+            {(format === 'pdf' || format === 'comic') && (
+              <>
+                <IconButton color="inherit" onClick={(e) => { e.stopPropagation(); handleZoomOut() }}>
+                  <ZoomOut />
+                </IconButton>
+                <Typography variant="caption" sx={{ mx: 0.5, minWidth: 32, textAlign: 'center' }}>
+                  {Math.round(scale * 100)}%
+                </Typography>
+                <IconButton color="inherit" onClick={(e) => { e.stopPropagation(); handleZoomIn() }}>
+                  <ZoomIn />
+                </IconButton>
+              </>
+            )}
+            
+            <IconButton color="inherit" onClick={(e) => { e.stopPropagation(); setTocOpen(true) }}>
+              <Menu />
+            </IconButton>
+            <IconButton color="inherit" onClick={(e) => { 
+              e.stopPropagation()
+              loadBookmarks()
+              setBookmarksOpen(true)
+            }}>
+              <Bookmark />
+            </IconButton>
+            <IconButton color="inherit" onClick={(e) => { e.stopPropagation(); setSettingsOpen(true) }}>
+              <Settings />
+            </IconButton>
+          </Box>
         </Toolbar>
       </AppBar>
 

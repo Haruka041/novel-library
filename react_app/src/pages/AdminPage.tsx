@@ -1,6 +1,6 @@
 import { useMemo, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Box, Tabs, Tab, Typography, Container } from '@mui/material'
+import { Box, Tabs, Tab, Typography, Container, FormControl, InputLabel, Select, MenuItem, useMediaQuery, useTheme } from '@mui/material'
 import { People, LibraryBooks, Backup, Image, TextFields, LocalOffer, Psychology, Code, Settings } from '@mui/icons-material'
 import SettingsTab from '../components/admin/SettingsTab'
 import UsersTab from '../components/admin/UsersTab'
@@ -32,6 +32,8 @@ const TAB_NAMES = ['settings', 'users', 'libraries', 'tags', 'patterns', 'ai', '
 
 export default function AdminPage() {
   const [searchParams, setSearchParams] = useSearchParams()
+  const theme = useTheme()
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'))
   
   // 从 URL 读取当前 tab
   const tabValue = useMemo(() => {
@@ -42,7 +44,7 @@ export default function AdminPage() {
   }, [searchParams])
 
   // 更新 tab 到 URL
-  const handleTabChange = useCallback((_: React.SyntheticEvent, newValue: number) => {
+  const handleTabChange = useCallback((newValue: number) => {
     setSearchParams(prev => {
       const newParams = new URLSearchParams(prev)
       if (newValue === 0) {
@@ -61,22 +63,45 @@ export default function AdminPage() {
       </Typography>
 
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
-        <Tabs
-          value={tabValue}
-          onChange={handleTabChange}
-          variant="scrollable"
-          scrollButtons="auto"
-        >
-          <Tab icon={<Settings />} label="系统设置" iconPosition="start" />
-          <Tab icon={<People />} label="用户管理" iconPosition="start" />
-          <Tab icon={<LibraryBooks />} label="书库管理" iconPosition="start" />
-          <Tab icon={<LocalOffer />} label="标签管理" iconPosition="start" />
-          <Tab icon={<Code />} label="文件名规则" iconPosition="start" />
-          <Tab icon={<Psychology />} label="AI配置" iconPosition="start" />
-          <Tab icon={<Backup />} label="备份管理" iconPosition="start" />
-          <Tab icon={<Image />} label="封面管理" iconPosition="start" />
-          <Tab icon={<TextFields />} label="字体管理" iconPosition="start" />
-        </Tabs>
+        {isMobile ? (
+          <FormControl fullWidth size="small">
+            <InputLabel id="admin-tab-label">管理模块</InputLabel>
+            <Select
+              labelId="admin-tab-label"
+              label="管理模块"
+              value={tabValue}
+              onChange={(event) => handleTabChange(Number(event.target.value))}
+            >
+              <MenuItem value={0}>系统设置</MenuItem>
+              <MenuItem value={1}>用户管理</MenuItem>
+              <MenuItem value={2}>书库管理</MenuItem>
+              <MenuItem value={3}>标签管理</MenuItem>
+              <MenuItem value={4}>文件名规则</MenuItem>
+              <MenuItem value={5}>AI配置</MenuItem>
+              <MenuItem value={6}>备份管理</MenuItem>
+              <MenuItem value={7}>封面管理</MenuItem>
+              <MenuItem value={8}>字体管理</MenuItem>
+            </Select>
+          </FormControl>
+        ) : (
+          <Tabs
+            value={tabValue}
+            onChange={(_, newValue) => handleTabChange(newValue)}
+            variant="scrollable"
+            scrollButtons="auto"
+            allowScrollButtonsMobile
+          >
+            <Tab icon={<Settings />} label="系统设置" iconPosition="start" />
+            <Tab icon={<People />} label="用户管理" iconPosition="start" />
+            <Tab icon={<LibraryBooks />} label="书库管理" iconPosition="start" />
+            <Tab icon={<LocalOffer />} label="标签管理" iconPosition="start" />
+            <Tab icon={<Code />} label="文件名规则" iconPosition="start" />
+            <Tab icon={<Psychology />} label="AI配置" iconPosition="start" />
+            <Tab icon={<Backup />} label="备份管理" iconPosition="start" />
+            <Tab icon={<Image />} label="封面管理" iconPosition="start" />
+            <Tab icon={<TextFields />} label="字体管理" iconPosition="start" />
+          </Tabs>
+        )}
       </Box>
 
       <TabPanel value={tabValue} index={0}>
