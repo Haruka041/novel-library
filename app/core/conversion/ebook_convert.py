@@ -166,7 +166,7 @@ def _run_conversion_job(
     output_path: Path,
     fail_marker: Path
 ) -> None:
-    tmp_output = output_path.with_suffix(output_path.suffix + ".part")
+    tmp_output = output_path.with_name(f"{output_path.stem}.tmp{output_path.suffix}")
     try:
         if tmp_output.exists():
             tmp_output.unlink()
