@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import List, Optional
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File, Header
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import select, func
