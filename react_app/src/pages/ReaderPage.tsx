@@ -962,6 +962,9 @@ export default function ReaderPage() {
           setConvertMessage(convertErr?.response?.data?.detail || convertErr?.message || '转换失败')
         }
       } else {
+        const detail = (err as any)?.response?.data?.detail || (err as any)?.message
+        setError('加载目录失败')
+        setErrorDetail(detail || '请稍后重试')
         handleConvertSuggestion(err)
       }
       return false
