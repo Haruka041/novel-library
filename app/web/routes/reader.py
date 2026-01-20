@@ -6,6 +6,7 @@ import os
 import json
 import codecs
 import re
+import math
 from pathlib import Path
 from typing import Optional
 import multiprocessing
@@ -47,6 +48,8 @@ LARGE_FILE_THRESHOLD = 500 * 1024
 # 每页字符数
 CHARS_PER_PAGE = 50000
 TXT_STREAM_CHUNK_SIZE = 512 * 1024
+TXT_MAX_CHAPTER_BYTES = 2 * 1024 * 1024
+TXT_FALLBACK_CHUNK_BYTES = 512 * 1024
 
 # MOBI 提取上限，防止异常文件导致崩溃/内存暴涨
 MOBI_MAX_TEXT_CHARS = 5_000_000
@@ -624,13 +627,30 @@ def _finalize_chapters(
     """整理候选章节并补齐 endOffset/endByte"""
     min_gap = 40
     if not candidates:
-        return [{
-            "title": "全文",
-            "startOffset": 0,
-            "endOffset": total_length,
-            "startByte": 0,
-            "endByte": total_bytes
-        }]
+        chapters = []
+        if total_bytes <= 0:
+            return [{
+                "title": "全文",
+                "startOffset": 0,
+                "endOffset": total_length,
+                "startByte": 0,
+                "endByte": total_bytes
+            }]
+        avg_bytes = total_bytes / max(1, total_length)
+        chunk_count = math.ceil(total_bytes / TXT_FALLBACK_CHUNK_BYTES)
+        for idx in range(chunk_count):
+            start_byte = idx * TXT_FALLBACK_CHUNK_BYTES
+            end_byte = min(total_bytes, start_byte + TXT_FALLBACK_CHUNK_BYTES)
+            start_offset = int(start_byte / avg_bytes)
+            end_offset = int(end_byte / avg_bytes)
+            chapters.append({
+                "title": f"正文 {idx + 1}/{chunk_count}",
+                "startOffset": start_offset,
+                "endOffset": end_offset,
+                "startByte": start_byte,
+                "endByte": end_byte
+            })
+        return chapters
 
     candidates.sort(key=lambda x: x["startOffset"])
     filtered = []
@@ -666,7 +686,33 @@ def _finalize_chapters(
             "endByte": filtered[0]["startByte"]
         })
 
-    return chapters
+    if not chapters:
+        return chapters
+
+    avg_bytes = total_bytes / max(1, total_length)
+    expanded = []
+    for chapter in chapters:
+        start_byte = chapter["startByte"]
+        end_byte = chapter["endByte"]
+        size = end_byte - start_byte
+        if size <= TXT_MAX_CHAPTER_BYTES:
+            expanded.append(chapter)
+            continue
+        parts = max(1, math.ceil(size / TXT_MAX_CHAPTER_BYTES))
+        for idx in range(parts):
+            part_start = start_byte + idx * TXT_MAX_CHAPTER_BYTES
+            part_end = min(end_byte, part_start + TXT_MAX_CHAPTER_BYTES)
+            part_start_offset = int(part_start / avg_bytes)
+            part_end_offset = int(part_end / avg_bytes)
+            expanded.append({
+                "title": f"{chapter['title']} ({idx + 1}/{parts})",
+                "startOffset": part_start_offset,
+                "endOffset": part_end_offset,
+                "startByte": part_start,
+                "endByte": part_end
+            })
+
+    return expanded
 
 
 def _build_txt_cache_streaming(
