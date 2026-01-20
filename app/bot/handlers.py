@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.database import get_db
-from app.models import User, Book, Library, Author, ReadingProgress, BookVersion, Favorite
+from app.models import User, Book, Library, Author, ReadingProgress, ReadingSession, BookVersion, Favorite
 from app.utils.logger import logger
 from app.utils.permissions import (
     get_accessible_library_ids,
@@ -78,6 +78,10 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 📈 进度
 /progress - 查看阅读进度
 /continue - 继续阅读
+/history - 阅读历史
+
+📊 统计
+/stats - 书库统计
 
 ❓ 帮助
 /help - 显示此帮助信息
@@ -472,6 +476,16 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 page = int(parts[1])
                 await _perform_continue(update, telegram_id, page, is_callback=True)
+            except ValueError:
+                await query.answer("无效的页码", show_alert=True)
+
+    elif data.startswith("history:"):
+        # 阅读历史翻页: history:<page>
+        parts = data.split(":")
+        if len(parts) == 2:
+            try:
+                page = int(parts[1])
+                await _perform_history(update, telegram_id, page, is_callback=True)
             except ValueError:
                 await query.answer("无效的页码", show_alert=True)
 
@@ -1188,6 +1202,146 @@ async def progress_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.error(f"获取阅读进度失败: {e}")
             await update.message.reply_text("❌ 获取失败，请稍后重试")
+
+
+async def history_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """处理 /history 命令"""
+    telegram_id = str(update.effective_user.id)
+    page = 1
+    await _perform_history(update, telegram_id, page, is_callback=False)
+
+
+async def _perform_history(update: Update, telegram_id: str, page: int, is_callback: bool = False):
+    """获取阅读历史并分页展示"""
+    async for db in get_db():
+        try:
+            user = await _get_bound_user(update, telegram_id, db, is_callback)
+            if not user:
+                return
+            result = await db.execute(
+                select(ReadingProgress)
+                .options(joinedload(ReadingProgress.book).joinedload(Book.author))
+                .where(ReadingProgress.user_id == user.id)
+                .order_by(desc(ReadingProgress.last_read_at))
+            )
+            progress_list = result.scalars().all()
+            filtered = []
+            for progress in progress_list:
+                if progress.book and await check_book_access(user, progress.book.id, db):
+                    filtered.append(progress)
+
+            total = len(filtered)
+            if total == 0:
+                msg = "暂无阅读历史"
+                if is_callback:
+                    await update.callback_query.edit_message_text(msg)
+                else:
+                    await update.message.reply_text(msg)
+                return
+
+            total_pages = math.ceil(total / PAGE_SIZE)
+            start = (page - 1) * PAGE_SIZE
+            end = start + PAGE_SIZE
+            page_items = filtered[start:end]
+
+            message = "阅读历史\n"
+            message += f"共 {total} 本 | 第 {page}/{total_pages} 页\n\n"
+            for i, progress in enumerate(page_items, start=start+1):
+                book = progress.book
+                author_name = book.author.name if book.author else "未知"
+                percent = int(progress.progress * 100)
+                status = "已读完" if progress.finished else "阅读中"
+                last_read_at = progress.last_read_at.strftime('%m-%d %H:%M') if progress.last_read_at else "未知"
+                message += f"{i:02d}. {book.title}\n"
+                message += f"    {author_name} | {status} {percent}% | {last_read_at}\n"
+                message += f"    /info {book.id}\n"
+
+            keyboard = []
+            nav_row = []
+            if page > 1:
+                nav_row.append(InlineKeyboardButton("上一页", callback_data=f"history:{page-1}"))
+            nav_row.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="noop"))
+            if page < total_pages:
+                nav_row.append(InlineKeyboardButton("下一页", callback_data=f"history:{page+1}"))
+            if nav_row:
+                keyboard.append(nav_row)
+            reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
+
+            if is_callback:
+                await update.callback_query.edit_message_text(message, reply_markup=reply_markup)
+            else:
+                await update.message.reply_text(message, reply_markup=reply_markup)
+        except Exception as e:
+            logger.error(f"获取阅读历史失败: {e}")
+            msg = "获取阅读历史失败，请稍后重试"
+            if is_callback:
+                await update.callback_query.answer(msg, show_alert=True)
+            else:
+                await update.message.reply_text(msg)
+
+
+async def stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """处理 /stats 命令"""
+    telegram_id = str(update.effective_user.id)
+    async for db in get_db():
+        try:
+            user = await _get_bound_user(update, telegram_id, db, is_callback=False)
+            if not user:
+                return
+            library_ids = await get_accessible_library_ids(user, db)
+            if not library_ids:
+                await update.message.reply_text("暂无可访问的书库")
+                return
+
+            book_count = await db.execute(
+                select(func.count(Book.id)).where(Book.library_id.in_(library_ids))
+            )
+            total_books = book_count.scalar() or 0
+
+            author_count = await db.execute(
+                select(func.count(func.distinct(Book.author_id)))
+                .where(Book.library_id.in_(library_ids))
+                .where(Book.author_id.isnot(None))
+            )
+            total_authors = author_count.scalar() or 0
+
+            favorite_count = await db.execute(
+                select(func.count(Favorite.id)).where(Favorite.user_id == user.id)
+            )
+            total_favorites = favorite_count.scalar() or 0
+
+            progress_count = await db.execute(
+                select(func.count(ReadingProgress.id)).where(ReadingProgress.user_id == user.id)
+            )
+            total_progress = progress_count.scalar() or 0
+
+            last_read_result = await db.execute(
+                select(func.max(ReadingProgress.last_read_at)).where(ReadingProgress.user_id == user.id)
+            )
+            last_read_at = last_read_result.scalar()
+
+            session_seconds_result = await db.execute(
+                select(func.sum(ReadingSession.duration_seconds)).where(ReadingSession.user_id == user.id)
+            )
+            total_seconds = session_seconds_result.scalar() or 0
+            hours = total_seconds // 3600
+            minutes = (total_seconds % 3600) // 60
+
+            message = "书库统计\n\n"
+            message += f"书库: {len(library_ids)}\n"
+            message += f"书籍: {total_books}\n"
+            message += f"作者: {total_authors}\n"
+            message += f"收藏: {total_favorites}\n"
+            message += f"阅读记录: {total_progress}\n"
+            if total_seconds > 0:
+                message += f"累计阅读: {hours}小时{minutes}分\n"
+            if last_read_at:
+                message += f"最近阅读: {last_read_at.strftime('%Y-%m-%d %H:%M')}\n"
+
+            await update.message.reply_text(message)
+        except Exception as e:
+            logger.error(f"获取统计信息失败: {e}")
+            await update.message.reply_text("获取统计信息失败，请稍后重试")
 
 
 def generate_bind_code(user_id: int) -> str:

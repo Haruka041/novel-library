@@ -26,6 +26,8 @@ from app.bot.handlers import (
     favorites_handler,
     progress_handler,
     continue_handler,
+    history_handler,
+    stats_handler,
     callback_handler,
 )
 
@@ -76,6 +78,8 @@ class TelegramBot:
             self.application.add_handler(CommandHandler("favorites", favorites_handler))
             self.application.add_handler(CommandHandler("progress", progress_handler))
             self.application.add_handler(CommandHandler("continue", continue_handler))
+            self.application.add_handler(CommandHandler("history", history_handler))
+            self.application.add_handler(CommandHandler("stats", stats_handler))
             
             # 注册回调查询处理器（用于翻页按钮）
             self.application.add_handler(CallbackQueryHandler(callback_handler))
@@ -98,6 +102,8 @@ class TelegramBot:
                 BotCommand("favorites", "我的收藏"),
                 BotCommand("progress", "查看阅读进度"),
                 BotCommand("continue", "继续阅读"),
+                BotCommand("history", "阅读历史"),
+                BotCommand("stats", "书库统计"),
             ]
             await self.application.bot.set_my_commands(commands)
             
