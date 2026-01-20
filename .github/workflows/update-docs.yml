@@ -1,0 +1,97 @@
+name: Update Docs Metadata
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+jobs:
+  update-docs:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: 同步 update.json 到文档仓库
+        env:
+          DOCS_PUSH_TOKEN: ${{ secrets.DOCS_PUSH_TOKEN }}
+          DOCS_REPO: Haruka041/sooklib-docs
+          DOCS_BRANCH: main
+        run: |
+          set -e
+          if [ -z "$DOCS_PUSH_TOKEN" ]; then
+            echo "DOCS_PUSH_TOKEN 未配置，跳过更新。"
+            exit 0
+          fi
+          git clone https://x-access-token:${DOCS_PUSH_TOKEN}@github.com/${DOCS_REPO}.git docs-repo
+          python - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          docs_dir = Path("docs-repo")
+          update_file = docs_dir / "update.json"
+          now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+          data = {
+              "stable": {
+                  "version": "v0.0.0",
+                  "url": "https://github.com/Haruka041/sooklib",
+                  "notes": "稳定版更新说明",
+                  "published_at": now,
+              },
+              "beta": {
+                  "version": "beta-init",
+                  "url": "https://github.com/Haruka041/sooklib",
+                  "notes": "测试版更新说明",
+                  "published_at": now,
+              },
+          }
+
+          if update_file.exists():
+              try:
+                  data.update(json.loads(update_file.read_text(encoding="utf-8")))
+              except json.JSONDecodeError:
+                  pass
+
+          ref = os.environ.get("GITHUB_REF", "")
+          sha = os.environ.get("GITHUB_SHA", "")[:7]
+          ref_name = os.environ.get("GITHUB_REF_NAME", "")
+
+          if ref.startswith("refs/tags/v"):
+              data["stable"] = {
+                  "version": ref_name,
+                  "url": f"https://github.com/Haruka041/sooklib/releases/tag/{ref_name}",
+                  "notes": f"自动发布 {ref_name}",
+                  "published_at": now,
+              }
+          else:
+              data["beta"] = {
+                  "version": f"beta-{sha}",
+                  "url": f"https://github.com/Haruka041/sooklib/tree/{os.environ.get('GITHUB_SHA', '')}",
+                  "notes": f"自动发布 beta-{sha}",
+                  "published_at": now,
+              }
+
+          update_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+          PY
+          cd docs-repo
+          git config user.name "sooklib-bot"
+          git config user.email "sooklib-bot@users.noreply.github.com"
+          git add update.json
+          if git diff --cached --quiet; then
+            echo "update.json 无变化"
+            exit 0
+          fi
+          git commit -m "chore: update update.json (${GITHUB_REF_NAME})"
+          git push origin "${DOCS_BRANCH}"
