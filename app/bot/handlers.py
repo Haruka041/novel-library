@@ -3,6 +3,8 @@ Telegram Bot 命令处理器
 """
 import secrets
 import math
+import html
+import re
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -32,8 +34,46 @@ _search_cache = {}
 PAGE_SIZE = 10
 
 
+def _escape(text: Optional[str]) -> str:
+    """转义 HTML 文本，避免链接渲染异常"""
+    if text is None:
+        return ""
+    return html.escape(str(text))
+
+
+async def _get_bot_username(context: Optional[ContextTypes.DEFAULT_TYPE]) -> Optional[str]:
+    """获取机器人用户名，用于构建 deep link"""
+    if not context:
+        return None
+    username = getattr(context.bot, "username", None)
+    if username:
+        return username
+    try:
+        me = await context.bot.get_me()
+        return me.username
+    except Exception:
+        return None
+
+
+def _format_book_title(title: str, book_id: int, bot_username: Optional[str]) -> str:
+    """格式化书名为可点击链接"""
+    safe_title = _escape(title)
+    if not bot_username:
+        return safe_title
+    link = f"https://t.me/{bot_username}?start=book_{book_id}"
+    return f'<a href="{link}">{safe_title}</a>'
+
+
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """处理 /start 命令"""
+    telegram_id = str(update.effective_user.id)
+    if context.args:
+        payload = context.args[0]
+        match = re.search(r"book_(\d+)", payload)
+        if match:
+            book_id = int(match.group(1))
+            await _send_book_info(update, telegram_id, book_id, is_callback=False)
+            return
     user = update.effective_user
     
     welcome_message = f"""
@@ -189,13 +229,21 @@ async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyword = " ".join(context.args)
     page = 1
     
-    await _perform_search(update, telegram_id, keyword, page, is_callback=False)
+    await _perform_search(update, telegram_id, keyword, page, is_callback=False, context=context)
 
 
-async def _perform_search(update: Update, telegram_id: str, keyword: str, page: int, is_callback: bool = False):
+async def _perform_search(
+    update: Update,
+    telegram_id: str,
+    keyword: str,
+    page: int,
+    is_callback: bool = False,
+    context: Optional[ContextTypes.DEFAULT_TYPE] = None,
+):
     """执行搜索并显示结果"""
     async for db in get_db():
         try:
+            bot_username = await _get_bot_username(context)
             # 获取用户
             user = await get_user_by_telegram_id(db, telegram_id)
             if not user:
@@ -254,11 +302,11 @@ async def _perform_search(update: Update, telegram_id: str, keyword: str, page: 
             books = accessible_books[start:end]
             
             # 构建结果消息
-            message = f"🔍 搜索: {keyword}\n"
+            message = f"🔍 搜索: {_escape(keyword)}\n"
             message += f"📚 共 {total} 本 | 第 {page}/{total_pages} 页\n\n"
             
             for i, book in enumerate(books, start=start+1):
-                author_name = book.author.name if book.author else "未知"
+                author_name = _escape(book.author.name if book.author else "未知")
                 # 获取文件大小
                 file_size = 0
                 file_format = "unknown"
@@ -270,8 +318,8 @@ async def _perform_search(update: Update, telegram_id: str, keyword: str, page: 
                 
                 size_str = f"{file_size / 1024:.1f}KB" if file_size < 1024*1024 else f"{file_size / 1024 / 1024:.1f}MB"
                 
-                message += f"{i:02d}. 📖 {book.title}\n"
-                message += f"    👤 {author_name} | {file_format.upper()} | {size_str}\n"
+                message += f"{i:02d}. 📖 {_format_book_title(book.title, book.id, bot_username)}\n"
+                message += f"    👤 {author_name} | {_escape(file_format.upper())} | {size_str}\n"
                 message += f"    🆔 /info {book.id}\n"
                 message += f"    🆔 /download {book.id}\n"
             
@@ -293,9 +341,9 @@ async def _perform_search(update: Update, telegram_id: str, keyword: str, page: 
             reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
             
             if is_callback:
-                await update.callback_query.edit_message_text(message, reply_markup=reply_markup)
+                await update.callback_query.edit_message_text(message, reply_markup=reply_markup, parse_mode="HTML", disable_web_page_preview=True)
             else:
-                await update.message.reply_text(message, reply_markup=reply_markup)
+                await update.message.reply_text(message, reply_markup=reply_markup, parse_mode="HTML", disable_web_page_preview=True)
             
         except Exception as e:
             logger.error(f"搜索失败: {e}")
@@ -311,13 +359,20 @@ async def recent_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     telegram_id = str(update.effective_user.id)
     page = 1
     
-    await _perform_recent(update, telegram_id, page, is_callback=False)
+    await _perform_recent(update, telegram_id, page, is_callback=False, context=context)
 
 
-async def _perform_recent(update: Update, telegram_id: str, page: int, is_callback: bool = False):
+async def _perform_recent(
+    update: Update,
+    telegram_id: str,
+    page: int,
+    is_callback: bool = False,
+    context: Optional[ContextTypes.DEFAULT_TYPE] = None,
+):
     """获取最新书籍并显示"""
     async for db in get_db():
         try:
+            bot_username = await _get_bot_username(context)
             # 获取用户
             user = await get_user_by_telegram_id(db, telegram_id)
             if not user:
@@ -377,7 +432,7 @@ async def _perform_recent(update: Update, telegram_id: str, page: int, is_callba
             message += f"共 {total} 本 | 第 {page}/{total_pages} 页\n\n"
             
             for i, book in enumerate(books, start=start+1):
-                author_name = book.author.name if book.author else "未知"
+                author_name = _escape(book.author.name if book.author else "未知")
                 # 获取文件大小
                 file_size = 0
                 file_format = "unknown"
@@ -390,8 +445,8 @@ async def _perform_recent(update: Update, telegram_id: str, page: int, is_callba
                 size_str = f"{file_size / 1024:.1f}KB" if file_size < 1024*1024 else f"{file_size / 1024 / 1024:.1f}MB"
                 date_str = book.added_at.strftime('%m-%d') if book.added_at else ""
                 
-                message += f"{i:02d}. 📖 {book.title}\n"
-                message += f"    👤 {author_name} | {file_format.upper()} | {size_str} | {date_str}\n"
+                message += f"{i:02d}. 📖 {_format_book_title(book.title, book.id, bot_username)}\n"
+                message += f"    👤 {author_name} | {_escape(file_format.upper())} | {size_str} | {date_str}\n"
                 message += f"    🆔 /info {book.id}\n"
                 message += f"    🆔 /download {book.id}\n"
             
@@ -413,9 +468,9 @@ async def _perform_recent(update: Update, telegram_id: str, page: int, is_callba
             reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
             
             if is_callback:
-                await update.callback_query.edit_message_text(message, reply_markup=reply_markup)
+                await update.callback_query.edit_message_text(message, reply_markup=reply_markup, parse_mode="HTML", disable_web_page_preview=True)
             else:
-                await update.message.reply_text(message, reply_markup=reply_markup)
+                await update.message.reply_text(message, reply_markup=reply_markup, parse_mode="HTML", disable_web_page_preview=True)
             
         except Exception as e:
             logger.error(f"获取最新书籍失败: {e}")
@@ -445,7 +500,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyword = parts[1]
             try:
                 page = int(parts[2])
-                await _perform_search(update, telegram_id, keyword, page, is_callback=True)
+                await _perform_search(update, telegram_id, keyword, page, is_callback=True, context=context)
             except ValueError:
                 await query.answer("无效的页码", show_alert=True)
     
@@ -455,7 +510,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if len(parts) == 2:
             try:
                 page = int(parts[1])
-                await _perform_recent(update, telegram_id, page, is_callback=True)
+                await _perform_recent(update, telegram_id, page, is_callback=True, context=context)
             except ValueError:
                 await query.answer("无效的页码", show_alert=True)
     
@@ -465,7 +520,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if len(parts) == 2:
             try:
                 page = int(parts[1])
-                await _perform_favorites(update, telegram_id, page, is_callback=True)
+                await _perform_favorites(update, telegram_id, page, is_callback=True, context=context)
             except ValueError:
                 await query.answer("无效的页码", show_alert=True)
 
@@ -475,7 +530,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if len(parts) == 2:
             try:
                 page = int(parts[1])
-                await _perform_continue(update, telegram_id, page, is_callback=True)
+                await _perform_continue(update, telegram_id, page, is_callback=True, context=context)
             except ValueError:
                 await query.answer("无效的页码", show_alert=True)
 
@@ -485,7 +540,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if len(parts) == 2:
             try:
                 page = int(parts[1])
-                await _perform_history(update, telegram_id, page, is_callback=True)
+                await _perform_history(update, telegram_id, page, is_callback=True, context=context)
             except ValueError:
                 await query.answer("无效的页码", show_alert=True)
 
@@ -832,13 +887,20 @@ async def favorites_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """处理 /favorites 命令"""
     telegram_id = str(update.effective_user.id)
     page = 1
-    await _perform_favorites(update, telegram_id, page, is_callback=False)
+    await _perform_favorites(update, telegram_id, page, is_callback=False, context=context)
 
 
-async def _perform_favorites(update: Update, telegram_id: str, page: int, is_callback: bool = False):
+async def _perform_favorites(
+    update: Update,
+    telegram_id: str,
+    page: int,
+    is_callback: bool = False,
+    context: Optional[ContextTypes.DEFAULT_TYPE] = None,
+):
     """获取收藏列表并分页展示"""
     async for db in get_db():
         try:
+            bot_username = await _get_bot_username(context)
             user = await _get_bound_user(update, telegram_id, db, is_callback)
             if not user:
                 return
@@ -872,7 +934,7 @@ async def _perform_favorites(update: Update, telegram_id: str, page: int, is_cal
             message = "⭐ 我的收藏\n"
             message += f"共 {total} 本 | 第 {page}/{total_pages} 页\n\n"
             for i, (favorite, book) in enumerate(page_items, start=start+1):
-                author_name = book.author.name if book.author else "未知"
+                author_name = _escape(book.author.name if book.author else "未知")
                 file_format = "unknown"
                 file_size = 0
                 if book.versions:
@@ -880,8 +942,8 @@ async def _perform_favorites(update: Update, telegram_id: str, page: int, is_cal
                     file_format = primary.file_format
                     file_size = primary.file_size
                 size_str = f"{file_size / 1024:.1f}KB" if file_size < 1024*1024 else f"{file_size / 1024 / 1024:.1f}MB"
-                message += f"{i:02d}. 📖 {book.title}\n"
-                message += f"    ✍️ {author_name} | {file_format.upper()} | {size_str}\n"
+                message += f"{i:02d}. 📖 {_format_book_title(book.title, book.id, bot_username)}\n"
+                message += f"    ✍️ {author_name} | {_escape(file_format.upper())} | {size_str}\n"
                 message += f"    🆔 /info {book.id}\n"
                 message += f"    🆔 /favorite {book.id} (取消/收藏)\n"
 
@@ -897,9 +959,9 @@ async def _perform_favorites(update: Update, telegram_id: str, page: int, is_cal
             reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
 
             if is_callback:
-                await update.callback_query.edit_message_text(message, reply_markup=reply_markup)
+                await update.callback_query.edit_message_text(message, reply_markup=reply_markup, parse_mode="HTML", disable_web_page_preview=True)
             else:
-                await update.message.reply_text(message, reply_markup=reply_markup)
+                await update.message.reply_text(message, reply_markup=reply_markup, parse_mode="HTML", disable_web_page_preview=True)
         except Exception as e:
             logger.error(f"获取收藏列表失败: {e}")
             msg = "❌ 获取收藏失败，请稍后重试"
@@ -913,13 +975,20 @@ async def continue_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """处理 /continue 命令"""
     telegram_id = str(update.effective_user.id)
     page = 1
-    await _perform_continue(update, telegram_id, page, is_callback=False)
+    await _perform_continue(update, telegram_id, page, is_callback=False, context=context)
 
 
-async def _perform_continue(update: Update, telegram_id: str, page: int, is_callback: bool = False):
+async def _perform_continue(
+    update: Update,
+    telegram_id: str,
+    page: int,
+    is_callback: bool = False,
+    context: Optional[ContextTypes.DEFAULT_TYPE] = None,
+):
     """获取继续阅读列表并分页展示"""
     async for db in get_db():
         try:
+            bot_username = await _get_bot_username(context)
             user = await _get_bound_user(update, telegram_id, db, is_callback)
             if not user:
                 return
@@ -957,9 +1026,9 @@ async def _perform_continue(update: Update, telegram_id: str, page: int, is_call
             message += f"共 {total} 本 | 第 {page}/{total_pages} 页\n\n"
             for i, progress in enumerate(page_items, start=start+1):
                 book = progress.book
-                author_name = book.author.name if book.author else "未知"
+                author_name = _escape(book.author.name if book.author else "未知")
                 percent = int(progress.progress * 100)
-                message += f"{i:02d}. 📖 {book.title}\n"
+                message += f"{i:02d}. 📖 {_format_book_title(book.title, book.id, bot_username)}\n"
                 message += f"    ✍️ {author_name} | 进度: {percent}%\n"
                 message += f"    🆔 /info {book.id}\n"
                 message += f"    🆔 /download {book.id}\n"
@@ -976,9 +1045,9 @@ async def _perform_continue(update: Update, telegram_id: str, page: int, is_call
             reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
 
             if is_callback:
-                await update.callback_query.edit_message_text(message, reply_markup=reply_markup)
+                await update.callback_query.edit_message_text(message, reply_markup=reply_markup, parse_mode="HTML", disable_web_page_preview=True)
             else:
-                await update.message.reply_text(message, reply_markup=reply_markup)
+                await update.message.reply_text(message, reply_markup=reply_markup, parse_mode="HTML", disable_web_page_preview=True)
         except Exception as e:
             logger.error(f"获取继续阅读失败: {e}")
             msg = "❌ 获取继续阅读失败，请稍后重试"
@@ -1208,13 +1277,20 @@ async def history_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """处理 /history 命令"""
     telegram_id = str(update.effective_user.id)
     page = 1
-    await _perform_history(update, telegram_id, page, is_callback=False)
+    await _perform_history(update, telegram_id, page, is_callback=False, context=context)
 
 
-async def _perform_history(update: Update, telegram_id: str, page: int, is_callback: bool = False):
+async def _perform_history(
+    update: Update,
+    telegram_id: str,
+    page: int,
+    is_callback: bool = False,
+    context: Optional[ContextTypes.DEFAULT_TYPE] = None,
+):
     """获取阅读历史并分页展示"""
     async for db in get_db():
         try:
+            bot_username = await _get_bot_username(context)
             user = await _get_bound_user(update, telegram_id, db, is_callback)
             if not user:
                 return
@@ -1248,11 +1324,11 @@ async def _perform_history(update: Update, telegram_id: str, page: int, is_callb
             message += f"共 {total} 本 | 第 {page}/{total_pages} 页\n\n"
             for i, progress in enumerate(page_items, start=start+1):
                 book = progress.book
-                author_name = book.author.name if book.author else "未知"
+                author_name = _escape(book.author.name if book.author else "未知")
                 percent = int(progress.progress * 100)
                 status = "已读完" if progress.finished else "阅读中"
                 last_read_at = progress.last_read_at.strftime('%m-%d %H:%M') if progress.last_read_at else "未知"
-                message += f"{i:02d}. {book.title}\n"
+                message += f"{i:02d}. {_format_book_title(book.title, book.id, bot_username)}\n"
                 message += f"    {author_name} | {status} {percent}% | {last_read_at}\n"
                 message += f"    /info {book.id}\n"
 
@@ -1268,9 +1344,9 @@ async def _perform_history(update: Update, telegram_id: str, page: int, is_callb
             reply_markup = InlineKeyboardMarkup(keyboard) if keyboard else None
 
             if is_callback:
-                await update.callback_query.edit_message_text(message, reply_markup=reply_markup)
+                await update.callback_query.edit_message_text(message, reply_markup=reply_markup, parse_mode="HTML", disable_web_page_preview=True)
             else:
-                await update.message.reply_text(message, reply_markup=reply_markup)
+                await update.message.reply_text(message, reply_markup=reply_markup, parse_mode="HTML", disable_web_page_preview=True)
         except Exception as e:
             logger.error(f"获取阅读历史失败: {e}")
             msg = "获取阅读历史失败，请稍后重试"
