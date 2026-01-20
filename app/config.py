@@ -82,7 +82,7 @@ class ReleaseConfig(BaseModel):
     name: str = "Sooklib"
     version: str = "1.0.0"
     channel: str = "beta"
-    update_url: str = "https://raw.githubusercontent.com/Haruka041/sooklib-docs/main/update.json"
+    update_url: str = "https://raw.githubusercontent.com/sooklib/sooklib-docs/main/update.json"
 
 
 class RBACConfig(BaseModel):

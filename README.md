@@ -38,7 +38,7 @@
 mkdir sooklib && cd sooklib
 
 # 2. 下载 docker-compose.yml
-curl -O https://raw.githubusercontent.com/Haruka041/sooklib/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/sooklib/sooklib/main/docker-compose.yml
 
 # 3. 修改配置（书库路径、密钥等）
 vim docker-compose.yml
@@ -57,7 +57,7 @@ version: '3.8'
 
 services:
   sooklib:
-    image: ghcr.io/haruka041/sooklib:latest
+    image: ghcr.io/sooklib/sooklib:latest
     container_name: sooklib
     ports:
       - "8080:8080"
@@ -94,12 +94,12 @@ services:
 | `TZ` | 时区 | Asia/Shanghai |
 | `APP_VERSION` | 当前版本号（用于更新检测） | 1.0.0 |
 | `APP_CHANNEL` | 更新通道（beta/stable） | beta |
-| `UPDATE_URL` | 更新信息地址（update.json） | https://raw.githubusercontent.com/Haruka041/sooklib-docs/main/update.json |
+| `UPDATE_URL` | 更新信息地址（update.json） | https://raw.githubusercontent.com/sooklib/sooklib-docs/main/update.json |
 
 ### 更新检测
 
 Sooklib 会读取 `update.json` 来判断是否有新版本。建议在公开文档仓库中维护：
-`https://github.com/Haruka041/sooklib-docs`
+`https://github.com/sooklib/sooklib-docs`
 
 示例格式：
 
@@ -107,13 +107,13 @@ Sooklib 会读取 `update.json` 来判断是否有新版本。建议在公开文
 {
   "stable": {
     "version": "v1.2.3",
-    "url": "https://github.com/Haruka041/sooklib/releases/tag/v1.2.3",
+    "url": "https://github.com/sooklib/sooklib/releases/tag/v1.2.3",
     "notes": "稳定版更新说明",
     "published_at": "2026-01-20"
   },
   "beta": {
     "version": "beta-abcdef1",
-    "url": "https://github.com/Haruka041/sooklib",
+    "url": "https://github.com/sooklib/sooklib",
     "notes": "测试版更新说明",
     "published_at": "2026-01-20"
   }
@@ -321,11 +321,11 @@ MIT License
 
 ## 📞 联系方式
 
-- 提交 Issue: https://github.com/Haruka041/sooklib/issues
-- Pull Request: https://github.com/Haruka041/sooklib/pulls
+- 提交 Issue: https://github.com/sooklib/sooklib/issues
+- Pull Request: https://github.com/sooklib/sooklib/pulls
 
 ---
 
-**Made with ❤️ by Haruka041**
+**Made with ❤️ by Sooklib**
 
 **⭐ 如果这个项目对你有帮助，请给个Star！**

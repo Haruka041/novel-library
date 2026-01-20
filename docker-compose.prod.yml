@@ -3,7 +3,7 @@ version: '3.8'
 services:
   sooklib:
     # 使用 GitHub Container Registry 的镜像
-    image: ghcr.io/haruka041/sooklib:latest
+    image: ghcr.io/sooklib/sooklib:latest
     container_name: sooklib
     ports:
       - "8080:8080"
@@ -28,5 +28,5 @@ services:
       - SECRET_KEY=CHANGE_THIS_TO_RANDOM_STRING
       # 版本与更新检测
       - APP_CHANNEL=beta
-      - UPDATE_URL=https://raw.githubusercontent.com/Haruka041/sooklib-docs/main/update.json
+      - UPDATE_URL=https://raw.githubusercontent.com/sooklib/sooklib-docs/main/update.json
     restart: unless-stopped
