@@ -1,37 +1,35 @@
-# 📚 Sooklib - 小说书库管理系统
+# Sooklib - 书城/书库管理系统
 
-一个功能强大的小说管理和阅读系统，包含完整的后端API、React WebUI前端、以及Telegram机器人集成。
+Sooklib 是一个以书库为核心、对标 Emby 的书城/书库项目，强调管理、发现与持续阅读体验。
+在线阅读仅支持 TXT 并做深度优化，其它格式仅提供下载阅读。
 
-## ✨ 主要特性
+## 项目定位
 
-### 📖 核心功能
-- **书籍管理** - 自动扫描、元数据提取、去重
-- **多路径书库** - 一个书库支持配置多个扫描路径
-- **后台扫描** - 异步扫描任务，支持百万级文件，实时进度追踪
-- **在线阅读** - TXT/EPUB阅读器，支持进度保存
-- **高级搜索** - 全文搜索，多条件筛选
-- **智能分类** - 作者、标签、书库管理
-- **权限控制** - 基于角色的访问控制（RBAC）
-- **封面管理** - 自动提取和缓存
-- **阅读进度** - 跨设备同步
-- **书签收藏** - 个人书签和收藏管理
-- **备份恢复** - 自动定时备份
+- **书库优先**：管理与发现体验优先于阅读器功能扩展
+- **在线阅读仅 TXT**：稳定性与大文件处理为第一目标
+- **其它格式仅下载**：EPUB/PDF/漫画等保留下载入口
+- **AI 方向**：对话式找书、推荐、文件名解析与辅助扫库
 
-### 🤖 Telegram机器人
-- 远程搜索和下载书籍
-- 阅读进度查询
-- 个性化推荐
+## 主要特性
 
-### 🔧 技术栈
-- **前端**: React 18 + TypeScript + Material-UI
-- **后端**: FastAPI + Python 3.11+
-- **数据库**: SQLite (默认) / PostgreSQL
-- **认证**: JWT
-- **部署**: Docker + GitHub Container Registry
+- **书籍管理**：自动扫描、元数据提取、去重、封面缓存
+- **多路径书库**：一个书库支持多个扫描路径
+- **后台扫描**：异步扫描任务，进度可追踪
+- **高级搜索**：关键词 + 多条件筛选
+- **权限与多用户**：JWT + RBAC
+- **阅读进度**：跨设备同步
+- **OPDS**：兼容主流阅读器的目录协议
+- **Telegram 机器人**：远程搜索、下载、TXT 在线阅读
+- **自动备份**：定时备份与恢复
 
-## 🚀 快速开始
+## 镜像与版本
 
-### Docker部署（推荐）
+- **GHCR**：`ghcr.io/sooklib/sooklib`
+- **DockerHub**：`sooklib/sooklib`
+- **版本号**：`v1.2.3`
+- **通道**：`beta`（测试）/ `stable`（稳定）
+
+## 快速开始（Docker）
 
 ```bash
 # 1. 创建目录
@@ -62,7 +60,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      # 书库目录（只读挂载，您的小说文件存放位置）
+      # 书库目录（只读挂载）
       - /path/to/your/novels:/data/novels:ro
       # 应用数据（数据库、日志等）
       - ./data:/app/data
@@ -83,25 +81,22 @@ services:
     restart: unless-stopped
 ```
 
-### 环境变量说明
+## 配置与更新
+
+常用环境变量：
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `ADMIN_USERNAME` | 管理员用户名 | admin |
 | `ADMIN_PASSWORD` | 管理员密码 | admin123 |
-| `SECRET_KEY` | JWT密钥 | (必须修改) |
+| `SECRET_KEY` | JWT 密钥 | (必须修改) |
 | `LOG_LEVEL` | 日志级别 | INFO |
 | `TZ` | 时区 | Asia/Shanghai |
 | `APP_VERSION` | 当前版本号（用于更新检测） | 1.0.0 |
 | `APP_CHANNEL` | 更新通道（beta/stable） | beta |
 | `UPDATE_URL` | 更新信息地址（update.json） | https://raw.githubusercontent.com/sooklib/sooklib-docs/main/update.json |
 
-### 更新检测
-
-Sooklib 会读取 `update.json` 来判断是否有新版本。建议在公开文档仓库中维护：
-`https://github.com/sooklib/sooklib-docs`
-
-示例格式：
+更新检测基于 `update.json`，示例格式：
 
 ```json
 {
@@ -120,212 +115,65 @@ Sooklib 会读取 `update.json` 来判断是否有新版本。建议在公开文
 }
 ```
 
-## 📁 项目结构
+## 在线阅读范围
 
-```
-sooklib/
-├── app/                      # 后端应用
-│   ├── core/                # 核心功能（扫描、元数据等）
-│   ├── web/                 # Web路由和模板
-│   ├── bot/                 # Telegram机器人
-│   ├── models.py            # 数据模型
-│   └── config.py            # 配置管理
-├── react_app/               # React WebUI前端
-│   ├── src/                # TypeScript源代码
-│   │   ├── components/     # UI组件
-│   │   ├── pages/          # 页面
-│   │   ├── stores/         # Zustand状态管理
-│   │   └── services/       # API服务
-│   └── package.json
-├── alembic/                 # 数据库迁移
-├── config/                  # 配置文件
-├── docs/                    # 文档
-├── Dockerfile               # Docker构建文件
-└── docker-compose.yml       # Docker编排
-```
+- **仅 TXT 支持在线阅读**
+- **EPUB/PDF/漫画等仅下载**
 
-## 🎯 功能完成度
+## OPDS 访问
 
-### 后端 (98%)
-- ✅ 用户认证和授权（JWT + RBAC）
-- ✅ 书籍管理（CRUD）
-- ✅ 自动扫描和元数据提取
-- ✅ 多路径书库支持
-- ✅ 后台扫描系统（支持百万级文件）
-- ✅ 搜索功能（全文搜索）
-- ✅ 在线阅读器（TXT/EPUB）
-- ✅ 封面管理
-- ✅ 阅读进度保存
-- ✅ 书签和收藏
-- ✅ 标签系统
-- ✅ OPDS协议支持
-- ✅ Telegram机器人
-- ✅ 自动备份
+OPDS 使用 HTTP Basic Auth：
 
-### React WebUI (85%)
-- ✅ 用户登录认证
-- ✅ 首页仪表盘
-- ✅ 书库浏览（网格/列表视图）
-- ✅ 书籍详情展示
-- ✅ 搜索功能
-- ✅ 在线阅读器（TXT/EPUB）
-- ✅ 个人中心
-- ✅ 后台管理（用户/书库/备份/封面）
-- ✅ 多路径管理界面
-- ✅ 扫描任务监控（实时进度）
-- ✅ PWA支持
-- ✅ 响应式设计
-- 🔜 收藏功能
-- 🔜 书签功能
-- 🔜 个人标签
+- 地址：`http://your-server:8080/opds/`
+- 用户名/密码：Sooklib 用户名密码
 
-## 🌐 访问地址
-
-| 路径 | 说明 |
-|------|------|
-| `/` | React WebUI |
-| `/api/docs` | API文档（Swagger UI） |
-| `/opds/` | OPDS目录 |
-
-## 📱 OPDS 阅读器使用
-
-OPDS 支持 HTTP Basic Auth 认证，使用您的 Sooklib 账号密码登录。
-
-### 在常见阅读器中配置
-
-**KOReader / 静读天下 / Moon+ Reader 等**：
-
-1. 打开 OPDS 目录设置
-2. 输入目录地址：`http://your-server:8080/opds/`
-3. 在认证设置中填写：
-   - 用户名：您的 Sooklib 用户名
-   - 密码：您的密码
-4. 保存并刷新
-
-**浏览器直接访问**：
-
-浏览器访问 `/opds/` 时会弹出 HTTP Basic Auth 登录框，输入用户名和密码即可。
-
-### OPDS 目录结构
+常用端点：
 
 | 端点 | 说明 |
 |------|------|
 | `/opds/` | 根目录（导航） |
-| `/opds/recent` | 最近添加的书籍 |
+| `/opds/recent` | 最近添加 |
 | `/opds/authors` | 作者索引 |
-| `/opds/author/{id}` | 特定作者的书籍 |
-| `/opds/search?q=关键词` | 搜索书籍 |
-| `/opds/download/{book_id}` | 下载书籍 |
+| `/opds/author/{id}` | 作者书籍 |
+| `/opds/search?q=关键词` | 搜索 |
+| `/opds/download/{book_id}` | 下载 |
 
-## 📖 文档
+## 文档
 
-- [安装指南](MIGRATION.md)
-- [API文档](http://localhost:8080/api/docs)
-- [多路径扫描部署](docs/MULTIPATH_SCAN_DEPLOYMENT.md) ⭐ **最新**
-- [搜索功能](docs/SEARCH_FEATURE_IMPLEMENTATION.md)
-- [在线阅读器](docs/ONLINE_READER_IMPLEMENTATION.md)
-- [封面管理](docs/COVER_FEATURE_IMPLEMENTATION.md)
-- [Telegram机器人](docs/TELEGRAM_BOT_IMPLEMENTATION.md)
-- [备份系统](docs/BACKUP_SYSTEM_IMPLEMENTATION.md)
-- [React WebUI](react_app/README.md)
+- 文档仓库：https://github.com/sooklib/sooklib-docs
+- 快速开始：https://github.com/sooklib/sooklib-docs/blob/main/docs/getting-started.md
+- Docker 部署：https://github.com/sooklib/sooklib-docs/blob/main/docs/docker-deployment.md
+- 配置说明：https://github.com/sooklib/sooklib-docs/blob/main/docs/configuration.md
+- 更新通道：https://github.com/sooklib/sooklib-docs/blob/main/docs/update-channel.md
+- Telegram 机器人：https://github.com/sooklib/sooklib-docs/blob/main/docs/telegram-bot.md
+- AI 功能：https://github.com/sooklib/sooklib-docs/blob/main/docs/ai-features.md
 
-## 🔒 权限系统
+## 开发
 
-### 角色
-- **Admin** - 系统管理员，所有权限
-- **Librarian** - 图书管理员，管理书籍
-- **User** - 普通用户，阅读和下载
-
-### 权限
-- `books:read` - 查看书籍
-- `books:write` - 管理书籍
-- `users:read` - 查看用户
-- `users:write` - 管理用户
-- `system:admin` - 系统管理
-
-## 📱 Telegram机器人使用
-
-```
-/start - 开始使用
-/search <关键词> - 搜索书籍
-/recent - 最近添加的书籍
-/progress - 我的阅读进度
-/help - 帮助信息
-```
-
-## 🛠️ 开发
-
-### 后端开发
+后端：
 
 ```bash
-# 安装依赖
 pip install -r requirements.txt
-
-# 运行开发服务器
 python -m app.main
-
-# 访问 http://localhost:8080
 ```
 
-### React WebUI 开发
+前端：
 
 ```bash
 cd react_app
-
-# 安装依赖
 npm install
-
-# 运行开发服务器（带API代理）
 npm run dev
-
-# 构建生产版本
-npm run build
 ```
 
-## 📝 更新日志
-
-### v1.2.0 (2026-01-16) ⭐ **最新**
-- ✨ **多路径书库** - 一个书库可配置多个扫描路径
-- ✨ **后台扫描系统** - 异步扫描，支持百万级文件
-- ✨ **实时进度监控** - 扫描进度实时展示，每2秒自动更新
-- ✨ **扫描历史追踪** - 完整的任务历史记录
-- ✨ **路径管理界面** - 图形化添加/删除/启用/禁用路径
-- 🚀 **性能优化** - 生成器模式 + 批量处理，内存稳定
-- 📖 **Docker部署指南** - 详细的多路径配置文档
-
-### v1.1.0 (2026-01-16)
-- ✨ 新增 React WebUI 前端
-- ✨ Docker镜像发布到 GHCR
-- 🐛 修复各种bug
-- 🗑️ 移除 Flutter Web 前端
-
-### v1.0.0 (2026-01-15)
-- ✨ FastAPI后端API
-- ✨ JWT认证系统
-- ✨ RBAC权限控制
-- ✨ 在线阅读器（TXT/EPUB）
-- ✨ Telegram机器人
-- ✨ 自动备份系统
-- ✨ Docker部署支持
-
-## 📄 许可证
+## 许可证
 
 MIT License
 
-## 🙏 致谢
+## 贡献
 
-- [React](https://react.dev/) - React框架
-- [Material-UI](https://mui.com/) - React组件库
-- [FastAPI](https://fastapi.tiangolo.com/) - 后端框架
-- [epub.js](https://github.com/futurepress/epub.js) - EPUB阅读器
-
-## 📞 联系方式
-
-- 提交 Issue: https://github.com/sooklib/sooklib/issues
-- Pull Request: https://github.com/sooklib/sooklib/pulls
+- Issue：https://github.com/sooklib/sooklib/issues
+- PR：https://github.com/sooklib/sooklib/pulls
 
 ---
 
-**Made with ❤️ by Sooklib**
-
-**⭐ 如果这个项目对你有帮助，请给个Star！**
+Made with ❤️ by Sooklib
