@@ -4,6 +4,8 @@
 """
 import os
 import json
+import codecs
+import re
 from pathlib import Path
 from typing import Optional
 import multiprocessing
@@ -44,6 +46,7 @@ mobi_parser = MobiParser()
 LARGE_FILE_THRESHOLD = 500 * 1024
 # 每页字符数
 CHARS_PER_PAGE = 50000
+TXT_STREAM_CHUNK_SIZE = 512 * 1024
 
 # MOBI 提取上限，防止异常文件导致崩溃/内存暴涨
 MOBI_MAX_TEXT_CHARS = 5_000_000
@@ -81,60 +84,23 @@ async def get_book_toc(
     file_path = Path(version.file_path)
     file_format = version.file_format.lower()
     
-    if file_format in ['txt', '.txt', 'mobi', '.mobi', 'azw3', '.azw3']:
-        # 读取全文并解析章节（仅提取目录，不返回内容）
-        if file_format in ['mobi', '.mobi', 'azw3', '.azw3']:
-            content = await _get_mobi_text(file_path)
-            if content is None:
-                converted_path = get_cached_conversion_path(file_path, "epub")
-                if converted_path:
-                    return {
-                        "format": "epub",
-                        "message": "MOBI/AZW3解析失败，已存在转换EPUB",
-                        "output_url": f"/api/books/{book.id}/converted?format=epub"
-                    }
-                raise HTTPException(status_code=422, detail="MOBI/AZW3解析失败，建议转换为EPUB")
-            total_length = len(content)
-            chapters = _parse_chapters(content)
-        else:
-            cache = await _ensure_txt_cache(file_path)
-            if not cache:
-                raise HTTPException(status_code=500, detail="无法读取文件内容")
-            index = cache["index"]
-            total_length = index.get("total_length", 0)
-            chapters = index.get("chapters", [])
-        
-        return {
-            "format": "txt",
-            "totalLength": total_length,
-            "chapters": chapters,
-            "charsPerPage": CHARS_PER_PAGE,
-            "totalPages": (total_length + CHARS_PER_PAGE - 1) // CHARS_PER_PAGE
-        }
-    
-    elif file_format in ['epub', '.epub']:
-        # EPUB 目录由 epub.js 处理
-        return {
-            "format": "epub",
-            "message": "EPUB目录由前端处理"
-        }
+    if file_format not in ['txt', '.txt']:
+        raise HTTPException(status_code=400, detail="仅支持TXT在线阅读，请下载原文件")
 
-    elif file_format in ['pdf', '.pdf']:
-        return {
-            "format": "pdf",
-            "message": "PDF目录由前端处理"
-        }
+    cache = await _ensure_txt_cache(file_path)
+    if not cache:
+        raise HTTPException(status_code=500, detail="无法读取文件内容")
+    index = cache["index"]
+    total_length = index.get("total_length", 0)
+    chapters = index.get("chapters", [])
 
-    elif file_format in ['zip', '.zip', 'cbz', '.cbz']:
-        images = ComicParser.get_image_list(file_path)
-        return {
-            "format": "comic",
-            "images": images,
-            "totalImages": len(images)
-        }
-    
-    else:
-        raise HTTPException(status_code=400, detail=f"不支持的文件格式: {file_format}")
+    return {
+        "format": "txt",
+        "totalLength": total_length,
+        "chapters": chapters,
+        "charsPerPage": CHARS_PER_PAGE,
+        "totalPages": (total_length + CHARS_PER_PAGE - 1) // CHARS_PER_PAGE
+    }
 
 
 
@@ -167,26 +133,16 @@ async def get_chapter_content(
     file_path = Path(version.file_path)
     file_format = version.file_format.lower()
     
-    if file_format not in ['txt', '.txt', 'mobi', '.mobi', 'azw3', '.azw3']:
-        raise HTTPException(status_code=400, detail="此API仅支持TXT/MOBI/AZW3格式")
-    
-    content = None
-    cache = None
-    if file_format in ['mobi', '.mobi', 'azw3', '.azw3']:
-        content = await _get_mobi_text(file_path)
-        if content is None:
-            log.error(f"无法读取文件内容: {file_path}")
-            raise HTTPException(status_code=422, detail="MOBI/AZW3解析失败，建议转换为EPUB")
-        all_chapters = _parse_chapters(content)
-        total_length = len(content)
-    else:
-        cache = await _ensure_txt_cache(file_path)
-        if not cache:
-            log.error(f"无法读取文件内容: {file_path}")
-            raise HTTPException(status_code=500, detail="无法读取文件内容")
-        index = cache["index"]
-        all_chapters = index.get("chapters", [])
-        total_length = index.get("total_length", 0)
+    if file_format not in ['txt', '.txt']:
+        raise HTTPException(status_code=400, detail="仅支持TXT在线阅读，请下载原文件")
+
+    cache = await _ensure_txt_cache(file_path)
+    if not cache:
+        log.error(f"无法读取文件内容: {file_path}")
+        raise HTTPException(status_code=500, detail="无法读取文件内容")
+    index = cache["index"]
+    all_chapters = index.get("chapters", [])
+    total_length = index.get("total_length", 0)
 
     total_chapters = len(all_chapters)
     
@@ -204,14 +160,11 @@ async def get_chapter_content(
     result_chapters = []
     for i in range(start_index, end_index):
         ch = all_chapters[i]
-        if cache:
-            chapter_content = _read_txt_range(
-                cache["text_path"],
-                ch.get("startByte", 0),
-                ch.get("endByte", 0)
-            )
-        else:
-            chapter_content = content[ch["startOffset"]:ch["endOffset"]]
+        chapter_content = _read_txt_range(
+            cache["text_path"],
+            ch.get("startByte", 0),
+            ch.get("endByte", 0)
+        )
         # 移除章节标题（因为会单独显示）
         chapter_content = chapter_content.replace(ch["title"], "", 1).strip()
         result_chapters.append({
@@ -394,21 +347,26 @@ def _extract_mobi_with_limits(file_path: Path) -> Optional[str]:
     return None
 
 
-async def _read_txt_file_with_encoding(file_path: Path) -> tuple[Optional[str], Optional[str]]:
-    """读取TXT文件内容（支持多种编码和自动检测），返回(内容, 编码)"""
+def _detect_txt_encoding(file_path: Path) -> Optional[str]:
+    """检测 TXT 编码，仅返回编码名"""
     import chardet
 
-    log.debug(f"开始读取TXT文件: {file_path}")
+    try:
+        with open(file_path, 'rb') as f:
+            raw_data = f.read(200000)
+    except Exception as e:
+        log.error(f"读取编码检测样本失败: {e}")
+        return None
 
-    # 检查文件是否存在
-    if not file_path.exists():
-        log.error(f"文件不存在: {file_path}")
-        return None, None
+    if not raw_data:
+        return None
 
-    # 简单二进制文件检测，避免将压缩/图片等误当 TXT 读取
-    if _is_probably_binary_file(file_path):
-        log.error(f"疑似二进制文件，拒绝按TXT读取: {file_path}")
-        raise HTTPException(status_code=415, detail="疑似非文本文件，可能扩展名错误或文件损坏")
+    if raw_data.startswith(codecs.BOM_UTF8):
+        return "utf-8-sig"
+    if raw_data.startswith(b'\xff\xfe'):
+        return "utf-16-le"
+    if raw_data.startswith(b'\xfe\xff'):
+        return "utf-16-be"
 
     def decode_quality(text: str) -> float:
         if not text:
@@ -425,52 +383,83 @@ async def _read_txt_file_with_encoding(file_path: Path) -> tuple[Optional[str], 
         cjk = sum(1 for ch in text if '\u4e00' <= ch <= '\u9fff')
         return cjk / total
 
-    def choose_encoding() -> Optional[str]:
-        candidates = [
-            'utf-8', 'utf-8-sig',
-            'gb18030', 'gbk', 'gb2312',
-            'big5',
-            'utf-16', 'utf-16-le', 'utf-16-be',
-        ]
+    candidates = [
+        'utf-8', 'utf-8-sig',
+        'gb18030', 'gbk', 'gb2312',
+        'big5',
+        'utf-16-le', 'utf-16-be',
+    ]
+    best_encoding = None
+    best_score = None
+    for encoding in candidates:
         try:
-            with open(file_path, 'rb') as f:
-                raw_data = f.read(200000)
-        except Exception as e:
-            log.error(f"读取编码检测样本失败: {e}")
-            return None
+            decoded = raw_data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+        score = (decode_quality(decoded), -cjk_ratio(decoded))
+        if best_score is None or score < best_score:
+            best_score = score
+            best_encoding = encoding
 
-        best_encoding = None
-        best_score = None
-        for encoding in candidates:
-            try:
-                decoded = raw_data.decode(encoding)
-            except UnicodeDecodeError:
-                continue
-            score = (decode_quality(decoded), -cjk_ratio(decoded))
-            if best_score is None or score < best_score:
-                best_score = score
-                best_encoding = encoding
+    if best_encoding:
+        return best_encoding
 
-        if best_encoding:
-            return best_encoding
+    detected = chardet.detect(raw_data).get('encoding')
+    if not detected:
+        return None
 
-        result = chardet.detect(raw_data)
-        return result.get('encoding')
+    detected_lower = detected.lower()
+    if detected_lower in ('utf-16', 'utf_16'):
+        even_nulls = sum(1 for i in range(0, len(raw_data), 2) if raw_data[i] == 0)
+        odd_nulls = sum(1 for i in range(1, len(raw_data), 2) if raw_data[i] == 0)
+        if odd_nulls > even_nulls:
+            return "utf-16-le"
+        if even_nulls > odd_nulls:
+            return "utf-16-be"
+        return None
+    if detected_lower in ('utf-16le', 'utf_16le'):
+        return "utf-16-le"
+    if detected_lower in ('utf-16be', 'utf_16be'):
+        return "utf-16-be"
 
-    encoding = choose_encoding()
-    if encoding:
-        try:
-            with open(file_path, 'r', encoding=encoding, errors='replace') as f:
-                content = f.read()
-            if decode_quality(content[:10000]) > 0.2:
-                log.warning(f"编码 {encoding} 读取质量较差: {file_path.name}")
-            log.debug(f"使用编码 {encoding} 读取文件: {file_path.name}")
-            return _clean_txt_content(content), encoding
-        except Exception as e:
-            log.error(f"使用编码 {encoding} 读取失败: {e}")
+    return detected
 
-    log.error(f"无法读取文件 (所有编码均失败): {file_path}")
-    return None, None
+
+async def _read_txt_file_with_encoding(file_path: Path) -> tuple[Optional[str], Optional[str]]:
+    """读取TXT文件内容（支持多种编码和自动检测），返回(内容, 编码)"""
+    log.debug(f"开始读取TXT文件: {file_path}")
+
+    if not file_path.exists():
+        log.error(f"文件不存在: {file_path}")
+        return None, None
+
+    if _is_probably_binary_file(file_path):
+        log.error(f"疑似二进制文件，拒绝按TXT读取: {file_path}")
+        raise HTTPException(status_code=415, detail="疑似非文本文件，可能扩展名错误或文件损坏")
+
+    encoding = _detect_txt_encoding(file_path)
+    if not encoding:
+        log.error(f"无法识别编码: {file_path}")
+        return None, None
+
+    def decode_quality(text: str) -> float:
+        if not text:
+            return 1.0
+        total = len(text)
+        replacement = text.count('\ufffd')
+        control = sum(1 for ch in text if ord(ch) < 32 and ch not in '\t\n\r')
+        return (replacement + control) / total
+
+    try:
+        with open(file_path, 'r', encoding=encoding, errors='replace') as f:
+            content = f.read()
+        if decode_quality(content[:10000]) > 0.2:
+            log.warning(f"编码 {encoding} 读取质量较差: {file_path.name}")
+        log.debug(f"使用编码 {encoding} 读取文件: {file_path.name}")
+        return _clean_txt_content(content), encoding
+    except Exception as e:
+        log.error(f"使用编码 {encoding} 读取失败: {e}")
+        return None, None
 
 
 async def _read_txt_file(file_path: Path) -> Optional[str]:
@@ -521,6 +510,277 @@ def _read_txt_range(text_path: Path, start_byte: int, end_byte: int) -> str:
     return chunk.decode('utf-8', errors='replace')
 
 
+def _clean_txt_line(line: str) -> str:
+    """按行清理 TXT 内容，减少零宽字符干扰"""
+    line = re.sub(r'[\u200b\u200c\u200d\ufeff]', '', line)
+    return line.rstrip()
+
+
+def _detect_chapter_candidates(
+    raw_line: str,
+    start_offset: int,
+    start_byte: int,
+    prev_blank: bool,
+    next_blank: bool,
+) -> list:
+    """基于单行判断是否为章节标题"""
+    import re
+
+    max_title_len = 50
+    strong_patterns = [
+        r'^第[零一二三四五六七八九十百千万亿\d]+[章节卷集部篇回].*$',
+        r'^(正文\s*)?第[零一二三四五六七八九十百千万亿\d]+[章节卷集部篇回].*$',
+        r'^Chapter\s+\d+.*$',
+        r'^卷[零一二三四五六七八九十百千万亿\d]+.*$',
+        r'^(序章|楔子|引子|前言|后记|尾声|番外|终章|大结局).*$',
+        r'^[【\[\(].+[】\]\)]$',
+    ]
+    weak_patterns = [
+        r'^\d{1,4}[\.、]\s*.*$',
+        r'^\d{1,4}\s+.*$',
+    ]
+    inline_strong = re.compile(
+        r'(正文\s*)?第[零一二三四五六七八九十百千万亿\d]+[章节卷集部篇回][^\n]{0,40}',
+        re.IGNORECASE
+    )
+
+    line = raw_line.strip()
+    if not line:
+        return []
+
+    has_blank_neighbor = prev_blank or next_blank
+    is_body_only = line in ('正文', '正文：', '正文:')
+    candidates = []
+    strong_regexes = [re.compile(p, re.IGNORECASE) for p in strong_patterns]
+    weak_regexes = [re.compile(p, re.IGNORECASE) for p in weak_patterns]
+
+    if len(line) <= max_title_len:
+        for pattern in strong_regexes:
+            if pattern.match(line):
+                candidates.append({
+                    "title": line,
+                    "startOffset": start_offset,
+                    "startByte": start_byte,
+                    "strength": 3,
+                    "is_body_only": is_body_only
+                })
+                return candidates
+
+    if len(line) <= max_title_len and has_blank_neighbor:
+        for pattern in weak_regexes:
+            if pattern.match(line):
+                candidates.append({
+                    "title": line,
+                    "startOffset": start_offset,
+                    "startByte": start_byte,
+                    "strength": 1,
+                    "is_body_only": is_body_only
+                })
+                return candidates
+
+    match = inline_strong.search(raw_line)
+    if match:
+        title = match.group().strip()
+        if len(title) <= max_title_len:
+            byte_offset = start_byte + len(raw_line[:match.start()].encode('utf-8'))
+            candidates.append({
+                "title": title,
+                "startOffset": start_offset + match.start(),
+                "startByte": byte_offset,
+                "strength": 2,
+                "is_body_only": False
+            })
+
+    return candidates
+
+
+def _finalize_chapters(
+    candidates: list,
+    total_length: int,
+    total_bytes: int
+) -> list:
+    """整理候选章节并补齐 endOffset/endByte"""
+    min_gap = 40
+    if not candidates:
+        return [{
+            "title": "全文",
+            "startOffset": 0,
+            "endOffset": total_length,
+            "startByte": 0,
+            "endByte": total_bytes
+        }]
+
+    candidates.sort(key=lambda x: x["startOffset"])
+    filtered = []
+    for cand in candidates:
+        if filtered and cand["startOffset"] - filtered[-1]["startOffset"] <= min_gap:
+            if cand["strength"] > filtered[-1]["strength"]:
+                filtered[-1] = cand
+            continue
+        filtered.append(cand)
+
+    if any(not c.get("is_body_only") for c in filtered):
+        filtered = [c for c in filtered if not c.get("is_body_only")]
+
+    chapters = []
+    for i, match in enumerate(filtered):
+        next_match = filtered[i + 1] if i < len(filtered) - 1 else None
+        end_offset = next_match["startOffset"] if next_match else total_length
+        end_byte = next_match["startByte"] if next_match else total_bytes
+        chapters.append({
+            "title": match["title"],
+            "startOffset": match["startOffset"],
+            "endOffset": end_offset,
+            "startByte": match["startByte"],
+            "endByte": end_byte
+        })
+
+    if filtered and filtered[0]["startOffset"] > 100:
+        chapters.insert(0, {
+            "title": "序",
+            "startOffset": 0,
+            "endOffset": filtered[0]["startOffset"],
+            "startByte": 0,
+            "endByte": filtered[0]["startByte"]
+        })
+
+    return chapters
+
+
+def _build_txt_cache_streaming(
+    file_path: Path,
+    text_path: Path,
+    index_path: Path,
+    encoding: str,
+) -> Optional[dict]:
+    """流式构建 TXT UTF-8 缓存与章节索引"""
+    tmp_text_path = text_path.with_suffix('.tmp')
+    decoder = codecs.getincrementaldecoder(encoding)(errors='replace')
+    buffer = ""
+    pending_cr = False
+    total_length = 0
+    total_bytes = 0
+    candidates = []
+    prev_line = None
+    prev_start_offset = 0
+    prev_start_byte = 0
+    prev_blank = True
+
+    try:
+        with open(file_path, 'rb') as src, open(tmp_text_path, 'wb') as dst:
+            while True:
+                chunk = src.read(TXT_STREAM_CHUNK_SIZE)
+                if not chunk:
+                    break
+                decoded = decoder.decode(chunk)
+                if not decoded:
+                    continue
+                if pending_cr:
+                    if decoded.startswith('\n'):
+                        decoded = decoded[1:]
+                    decoded = '\n' + decoded
+                    pending_cr = False
+                decoded = decoded.replace('\r\n', '\n')
+                if decoded.endswith('\r'):
+                    pending_cr = True
+                    decoded = decoded[:-1]
+                decoded = decoded.replace('\r', '\n')
+                buffer += decoded
+
+                while '\n' in buffer:
+                    line, buffer = buffer.split('\n', 1)
+                    line = _clean_txt_line(line)
+                    line_blank = not line.strip()
+                    if prev_line is not None:
+                        candidates.extend(
+                            _detect_chapter_candidates(
+                                prev_line,
+                                prev_start_offset,
+                                prev_start_byte,
+                                prev_blank,
+                                line_blank
+                            )
+                        )
+                        prev_blank = not prev_line.strip()
+
+                    line_start_offset = total_length
+                    line_start_byte = total_bytes
+                    line_bytes = (line + '\n').encode('utf-8')
+                    dst.write(line_bytes)
+                    total_length += len(line) + 1
+                    total_bytes += len(line_bytes)
+
+                    prev_line = line
+                    prev_start_offset = line_start_offset
+                    prev_start_byte = line_start_byte
+
+            decoded = decoder.decode(b'', final=True)
+            if pending_cr:
+                if decoded.startswith('\n'):
+                    decoded = decoded[1:]
+                decoded = '\n' + decoded
+                pending_cr = False
+            decoded = decoded.replace('\r\n', '\n')
+            if decoded.endswith('\r'):
+                decoded = decoded[:-1]
+            decoded = decoded.replace('\r', '\n')
+            buffer += decoded
+
+            final_line = _clean_txt_line(buffer)
+            final_blank = not final_line.strip()
+            if prev_line is not None:
+                candidates.extend(
+                    _detect_chapter_candidates(
+                        prev_line,
+                        prev_start_offset,
+                        prev_start_byte,
+                        prev_blank,
+                        final_blank
+                    )
+                )
+                prev_blank = not prev_line.strip()
+
+            if final_line:
+                final_start_offset = total_length
+                final_start_byte = total_bytes
+                final_bytes = final_line.encode('utf-8')
+                dst.write(final_bytes)
+                total_length += len(final_line)
+                total_bytes += len(final_bytes)
+                candidates.extend(
+                    _detect_chapter_candidates(
+                        final_line,
+                        final_start_offset,
+                        final_start_byte,
+                        prev_blank,
+                        True
+                    )
+                )
+
+        tmp_text_path.replace(text_path)
+    except Exception as e:
+        log.warning(f"构建TXT缓存失败: {file_path.name}, 错误: {e}")
+        try:
+            if tmp_text_path.exists():
+                tmp_text_path.unlink()
+        except Exception:
+            pass
+        return None
+
+    chapters = _finalize_chapters(candidates, total_length, total_bytes)
+    index_data = {
+        "encoding": encoding,
+        "total_length": total_length,
+        "total_bytes": total_bytes,
+        "chapters": chapters,
+    }
+    _write_txt_index(index_path, index_data)
+    return {
+        "text_path": text_path,
+        "index": index_data
+    }
+
+
 async def _ensure_txt_cache(file_path: Path) -> Optional[dict]:
     text_path, index_path, fail_marker, _cache_key = _get_txt_cache_paths(file_path)
 
@@ -534,41 +794,30 @@ async def _ensure_txt_cache(file_path: Path) -> Optional[dict]:
 
     if fail_marker.exists():
         return None
+    if _is_probably_binary_file(file_path):
+        log.error(f"疑似二进制文件，拒绝按TXT读取: {file_path}")
+        try:
+            fail_marker.touch(exist_ok=True)
+        except Exception:
+            pass
+        raise HTTPException(status_code=415, detail="疑似非文本文件，可能扩展名错误或文件损坏")
 
-    content, encoding = await _read_txt_file_with_encoding(file_path)
-    if content is None:
+    encoding = _detect_txt_encoding(file_path)
+    if not encoding:
         try:
             fail_marker.touch(exist_ok=True)
         except Exception:
             pass
         return None
 
-    tmp_text_path = text_path.with_suffix('.tmp')
-    try:
-        with open(tmp_text_path, 'w', encoding='utf-8') as f:
-            f.write(content)
-        tmp_text_path.replace(text_path)
-    except Exception as e:
-        log.warning(f"写入TXT缓存失败: {text_path.name}, 错误: {e}")
+    cache_result = _build_txt_cache_streaming(file_path, text_path, index_path, encoding)
+    if not cache_result:
         try:
-            if tmp_text_path.exists():
-                tmp_text_path.unlink()
+            fail_marker.touch(exist_ok=True)
         except Exception:
             pass
         return None
-
-    chapters, total_bytes = _parse_chapters_with_bytes(content)
-    index_data = {
-        "encoding": encoding,
-        "total_length": len(content),
-        "total_bytes": total_bytes,
-        "chapters": chapters,
-    }
-    _write_txt_index(index_path, index_data)
-    return {
-        "text_path": text_path,
-        "index": index_data
-    }
+    return cache_result
 
 
 @router.get("/books/{book_id}/content")
@@ -597,46 +846,10 @@ async def get_book_content(
     # 根据文件格式返回内容
     file_format = version.file_format.lower()
     
-    if file_format in ['txt', '.txt', 'mobi', '.mobi', 'azw3', '.azw3']:
-        if file_format in ['mobi', '.mobi', 'azw3', '.azw3']:
-            # 对于MOBI，先获取文本内容缓存路径
-            content = await _get_mobi_text(file_path)
-            if not content:
-                raise HTTPException(status_code=422, detail="MOBI/AZW3解析失败，建议转换为EPUB")
-            
-            # 为了复用 _read_txt_content 的分页逻辑，我们需要构造一个临时的缓存文件路径
-            # 这里我们简单一点：使用 _get_mobi_text 已经生成的缓存文件
-            
-            cache_dir = Path(settings.directories.data) / "cache" / "mobi_txt"
-            file_stat = file_path.stat()
-            file_hash_str = f"{file_path.name}_{file_stat.st_size}_{file_stat.st_mtime}"
-            cache_filename = hashlib.md5(file_hash_str.encode()).hexdigest() + ".txt"
-            cache_path = cache_dir / cache_filename
-            
-            if cache_path.exists():
-                return await _read_txt_content(cache_path, page)
-            else:
-                 raise HTTPException(status_code=500, detail="MOBI缓存文件丢失")
-                 
-        return await _read_txt_content(file_path, page)
-    elif file_format == 'epub' or file_format == '.epub':
-        # EPUB 文件直接返回，由前端 epub.js 处理
-        return FileResponse(
-            file_path,
-            media_type="application/epub+zip",
-            filename=version.file_name
-        )
-    elif file_format == 'pdf' or file_format == '.pdf':
-        return FileResponse(
-            file_path,
-            media_type="application/pdf",
-            filename=version.file_name
-        )
-    else:
-        raise HTTPException(
-            status_code=400,
-            detail=f"不支持的文件格式: {file_format}"
-        )
+    if file_format not in ['txt', '.txt']:
+        raise HTTPException(status_code=400, detail="仅支持TXT在线阅读，请下载原文件")
+
+    return await _read_txt_content(file_path, page)
 
 
 @router.post("/books/{book_id}/convert")
@@ -816,19 +1029,55 @@ async def _read_txt_content(file_path: Path, page: int = 0) -> dict:
     try:
         file_size = file_path.stat().st_size
         is_large_file = file_size > LARGE_FILE_THRESHOLD
-        
+
+        if is_large_file:
+            cache = await _ensure_txt_cache(file_path)
+            if not cache:
+                raise HTTPException(status_code=500, detail="无法读取文件内容")
+            index = cache["index"]
+            total_length = index.get("total_length", 0)
+            total_bytes = index.get("total_bytes", 0)
+            if total_length <= 0:
+                raise HTTPException(status_code=500, detail="无法读取文件内容")
+
+            total_pages = (total_length + CHARS_PER_PAGE - 1) // CHARS_PER_PAGE
+            start = page * CHARS_PER_PAGE
+            end = min(start + CHARS_PER_PAGE, total_length)
+            if start >= total_length:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"页码超出范围，最大页码为 {total_pages - 1}"
+                )
+
+            avg_bytes = total_bytes / max(1, total_length)
+            start_byte = int(start * avg_bytes)
+            end_byte = int(min(total_bytes, end * avg_bytes))
+            page_content = _read_txt_range(cache["text_path"], start_byte, end_byte)
+
+            return {
+                "format": "txt",
+                "content": page_content,
+                "length": total_length,
+                "page": page,
+                "totalPages": total_pages,
+                "hasMore": end < total_length,
+                "startOffset": start,
+                "endOffset": end,
+                "startByte": start_byte,
+                "endByte": end_byte
+            }
+
         content = await _read_txt_file(file_path)
         if content is None:
             raise HTTPException(
                 status_code=500,
                 detail="无法解码文件内容"
             )
-        
+
         total_length = len(content)
         total_pages = (total_length + CHARS_PER_PAGE - 1) // CHARS_PER_PAGE
-        
-        # 小文件或page=0时返回全部（向后兼容）
-        if not is_large_file or total_pages <= 1:
+
+        if total_pages <= 1:
             return {
                 "format": "txt",
                 "content": content,
@@ -837,19 +1086,16 @@ async def _read_txt_content(file_path: Path, page: int = 0) -> dict:
                 "totalPages": 1,
                 "hasMore": False
             }
-        
-        # 大文件分页加载
+
         start = page * CHARS_PER_PAGE
         end = min(start + CHARS_PER_PAGE, total_length)
-        
         if start >= total_length:
             raise HTTPException(
                 status_code=400,
                 detail=f"页码超出范围，最大页码为 {total_pages - 1}"
             )
-        
         page_content = content[start:end]
-        
+
         return {
             "format": "txt",
             "content": page_content,
@@ -960,14 +1206,11 @@ async def search_in_book(
     file_path = Path(version.file_path)
     file_format = version.file_format.lower()
     
-    if file_format not in ['txt', '.txt', 'mobi', '.mobi', 'azw3', '.azw3']:
-        raise HTTPException(status_code=400, detail="书内搜索仅支持TXT/MOBI/AZW3格式")
-    
+    if file_format not in ['txt', '.txt']:
+        raise HTTPException(status_code=400, detail="书内搜索仅支持TXT格式")
+
     # 读取文件内容
-    if file_format in ['mobi', '.mobi', 'azw3', '.azw3']:
-        content = await _get_mobi_text(file_path)
-    else:
-        content = await _read_txt_file(file_path)
+    content = await _read_txt_file(file_path)
         
     if content is None:
         raise HTTPException(status_code=500, detail="无法读取文件内容")
@@ -1401,7 +1644,14 @@ def _is_probably_binary_file(file_path: Path, sample_size: int = 8192) -> bool:
     if not sample:
         return False
 
+    if sample.startswith(b'\xff\xfe') or sample.startswith(b'\xfe\xff'):
+        return False
+
     if b'\x00' in sample:
+        even_nulls = sum(1 for i in range(0, len(sample), 2) if sample[i] == 0)
+        odd_nulls = sum(1 for i in range(1, len(sample), 2) if sample[i] == 0)
+        if max(even_nulls, odd_nulls) / max(1, len(sample) // 2) > 0.6:
+            return False
         return True
 
     control_bytes = 0

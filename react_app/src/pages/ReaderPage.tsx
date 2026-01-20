@@ -167,12 +167,7 @@ export default function ReaderPage() {
   const sourceFormatRef = useRef<string | null>(null)
   // 兼容旧代码
   const isEpub = format === 'epub'
-  const isConvertibleSource = useCallback(() => {
-    const source = sourceFormatRef.current || bookInfo?.format
-    if (!source) return false
-    const normalized = source.toLowerCase()
-    return ['mobi', '.mobi', 'azw3', '.azw3'].includes(normalized)
-  }, [bookInfo])
+  const isConvertibleSource = useCallback(() => false, [])
 
   const stopToolbarTouch = (event: React.TouchEvent) => {
     event.stopPropagation()
@@ -872,10 +867,7 @@ export default function ReaderPage() {
         format: fileFormat,
       })
 
-      if (fileFormat === 'epub' || fileFormat === '.epub') {
-        setFormat('epub')
-        await loadEpub()
-      } else if (['txt', '.txt', 'mobi', '.mobi', 'azw3', '.azw3'].includes(fileFormat)) {
+      if (['txt', '.txt'].includes(fileFormat)) {
         setFormat('txt')
         // 保存待恢复的偏移
         pendingScrollOffsetRef.current = initialChapterOffset
@@ -886,19 +878,11 @@ export default function ReaderPage() {
         }
         // 然后加载初始章节
         await loadChapterContent(initialChapterIndex)
-      } else if (fileFormat === 'pdf' || fileFormat === '.pdf') {
-        setFormat('pdf')
-        setCurrentChapter(initialChapterIndex)
-        setTotalChapters(1) 
-      } else if (['zip', '.zip', 'cbz', '.cbz'].includes(fileFormat)) {
-        setFormat('comic')
-        const tocOk = await loadToc()
-        if (!tocOk) {
-          return
-        }
-        setCurrentChapter(initialChapterIndex)
       } else {
-        setError(`暂不支持 ${fileFormat} 格式的在线阅读`)
+        setFormat(null)
+        setError('在线阅读仅支持 TXT 格式，请下载原文件')
+        setErrorDetail(`当前格式: ${fileFormat}`)
+        return
       }
     } catch (err: unknown) {
       console.error('加载书籍失败:', err)
