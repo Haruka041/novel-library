@@ -425,6 +425,28 @@ def _detect_txt_encoding(file_path: Path) -> Optional[str]:
     return detected
 
 
+def _sample_text_metrics(raw_data: bytes, encoding: str) -> tuple[float, float]:
+    decoded = raw_data.decode(encoding, errors='replace')
+    if not decoded:
+        return 1.0, 0.0
+    total = len(decoded)
+    replacement = decoded.count('\ufffd')
+    control = sum(1 for ch in decoded if ord(ch) < 32 and ch not in '\t\n\r')
+    quality = (replacement + control) / total
+    cjk = sum(1 for ch in decoded if '\u4e00' <= ch <= '\u9fff') / total
+    return quality, cjk
+
+
+def _is_text_sample_valid(file_path: Path, encoding: str) -> bool:
+    try:
+        with open(file_path, 'rb') as f:
+            raw_data = f.read(200000)
+    except Exception:
+        return False
+    quality, cjk_ratio = _sample_text_metrics(raw_data, encoding)
+    return quality <= 0.35 or cjk_ratio >= 0.01
+
+
 async def _read_txt_file_with_encoding(file_path: Path) -> tuple[Optional[str], Optional[str]]:
     """读取TXT文件内容（支持多种编码和自动检测），返回(内容, 编码)"""
     log.debug(f"开始读取TXT文件: {file_path}")
@@ -793,15 +815,16 @@ async def _ensure_txt_cache(file_path: Path) -> Optional[dict]:
             }
 
     if fail_marker.exists():
-        return None
-    if _is_probably_binary_file(file_path):
-        log.error(f"疑似二进制文件，拒绝按TXT读取: {file_path}")
-        try:
-            fail_marker.touch(exist_ok=True)
-        except Exception:
-            pass
-        raise HTTPException(status_code=415, detail="疑似非文本文件，可能扩展名错误或文件损坏")
+        encoding = _detect_txt_encoding(file_path)
+        if encoding and _is_text_sample_valid(file_path, encoding):
+            try:
+                fail_marker.unlink()
+            except Exception:
+                pass
+        else:
+            return None
 
+    binary_hint = _is_probably_binary_file(file_path)
     encoding = _detect_txt_encoding(file_path)
     if not encoding:
         try:
@@ -809,6 +832,13 @@ async def _ensure_txt_cache(file_path: Path) -> Optional[dict]:
         except Exception:
             pass
         return None
+    if binary_hint and not _is_text_sample_valid(file_path, encoding):
+        log.error(f"疑似二进制文件，拒绝按TXT读取: {file_path}")
+        try:
+            fail_marker.touch(exist_ok=True)
+        except Exception:
+            pass
+        raise HTTPException(status_code=415, detail="疑似非文本文件，可能扩展名错误或文件损坏")
 
     cache_result = _build_txt_cache_streaming(file_path, text_path, index_path, encoding)
     if not cache_result:
