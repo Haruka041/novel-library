@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Box, Typography, TextField, InputAdornment, Grid,
@@ -32,6 +32,37 @@ interface SearchResponse {
 
 const PAGE_SIZE = 24
 const FORMATS = ['txt', 'epub', 'mobi', 'azw3', 'pdf', 'cbz', 'cbr']
+
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+const renderHighlight = (text: string, terms: string[]) => {
+  if (!text || terms.length === 0) return text
+  const escaped = terms.map(escapeRegExp).filter(Boolean)
+  if (escaped.length === 0) return text
+  const pattern = new RegExp(`(${escaped.join('|')})`, 'gi')
+  const parts = text.split(pattern)
+  const lowerTerms = terms.map((term) => term.toLowerCase())
+  return parts.map((part, idx) => {
+    if (!part) return null
+    const isHit = lowerTerms.includes(part.toLowerCase())
+    if (!isHit) {
+      return (
+        <Box component="span" key={`${part}-${idx}`}>
+          {part}
+        </Box>
+      )
+    }
+    return (
+      <Box
+        component="span"
+        key={`${part}-${idx}`}
+        sx={{ bgcolor: 'warning.light', color: 'text.primary', px: 0.4, borderRadius: 0.5 }}
+      >
+        {part}
+      </Box>
+    )
+  })
+}
 
 export default function SearchPage() {
   const navigate = useNavigate()
@@ -69,6 +100,20 @@ export default function SearchPage() {
   const [suggestions, setSuggestions] = useState<SearchSuggestion[]>([])
   const [showSuggestions, setShowSuggestions] = useState(false)
   const isSelectingSuggestion = useRef(false)
+
+  const highlightTerms = useMemo(() => {
+    const terms: string[] = []
+    const trimmed = query.trim()
+    if (trimmed) {
+      trimmed.split(/\s+/).forEach((term) => {
+        if (term) terms.push(term)
+      })
+    } else if (selectedAuthor) {
+      const authorName = authors.find((author) => author.id === selectedAuthor)?.name
+      if (authorName) terms.push(authorName)
+    }
+    return Array.from(new Set(terms.map((term) => term.trim()).filter(Boolean))).slice(0, 3)
+  }, [query, selectedAuthor, authors])
   
   // 加载元数据（作者和书库）
   useEffect(() => {
@@ -599,21 +644,65 @@ export default function SearchPage() {
           <Typography color="text.secondary" sx={{ mt: 1 }}>
             尝试使用不同的关键词或减少筛选条件
           </Typography>
+          <Stack direction="row" spacing={1} sx={{ mt: 2, justifyContent: 'center', flexWrap: 'wrap' }}>
+            {hasActiveFilters && (
+              <Button variant="outlined" onClick={handleResetFilters}>
+                清空筛选
+              </Button>
+            )}
+            <Button variant="contained" onClick={() => navigate('/library')}>
+              浏览书库
+            </Button>
+          </Stack>
         </Box>
       ) : books.length > 0 ? (
         <>
           {/* 结果统计 */}
-          <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
             <Typography variant="body2" color="text.secondary">
               找到 {total} 本相关书籍
             </Typography>
+            <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>
+              {q && (
+                <Chip label={`关键词: ${q}`} size="small" variant="outlined" />
+              )}
+              {selectedAuthor && (
+                <Chip
+                  label={`作者: ${authors.find(a => a.id === selectedAuthor)?.name || selectedAuthor}`}
+                  size="small"
+                  variant="outlined"
+                  onDelete={() => setSelectedAuthor('')}
+                />
+              )}
+              {selectedLibrary && (
+                <Chip
+                  label={`书库: ${libraries.find(l => l.id === selectedLibrary)?.name || selectedLibrary}`}
+                  size="small"
+                  variant="outlined"
+                  onDelete={() => setSelectedLibrary('')}
+                />
+              )}
+              {selectedFormats.map((format) => (
+                <Chip
+                  key={`format-${format}`}
+                  label={`格式: ${format}`}
+                  size="small"
+                  variant="outlined"
+                  onDelete={() => setSelectedFormats((prev) => prev.filter((item) => item !== format))}
+                />
+              ))}
+            </Stack>
           </Box>
 
           {/* 搜索结果 */}
           <Grid container spacing={2}>
             {books.map((book) => (
               <Grid item xs={6} sm={4} md={3} lg={2} key={book.id}>
-                <BookCard book={book} />
+                <BookCard
+                  book={book}
+                  titleNode={renderHighlight(book.title, highlightTerms)}
+                  authorNode={book.author_name ? renderHighlight(book.author_name, highlightTerms) : undefined}
+                />
               </Grid>
             ))}
           </Grid>
@@ -632,6 +721,9 @@ export default function SearchPage() {
           <Search sx={{ fontSize: 64, color: 'grey.500', mb: 2 }} />
           <Typography color="text.secondary">
             输入关键词或使用筛选器查找书籍
+          </Typography>
+          <Typography color="text.secondary" variant="caption" sx={{ display: 'block', mt: 1 }}>
+            示例：书名 / 作者 / 系列名
           </Typography>
         </Box>
       ) : null}

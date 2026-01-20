@@ -1,7 +1,7 @@
 import { Box, Card, CardContent, Typography, Skeleton, Chip } from '@mui/material'
 import MenuBookIcon from '@mui/icons-material/MenuBook'
 import { useNavigate } from 'react-router-dom'
-import { useState, useMemo } from 'react'
+import { useState, useMemo, ReactNode } from 'react'
 import { BookSummary } from '../types'
 import { usePrimaryColor } from '../stores/themeStore'
 import { generateMorandiPalette } from '../utils/colorUtils'
@@ -10,6 +10,8 @@ interface BookCardProps {
   book?: BookSummary
   loading?: boolean
   onClick?: () => void
+  titleNode?: ReactNode
+  authorNode?: ReactNode
 }
 
 // 根据标题选择颜色索引
@@ -23,7 +25,7 @@ const getColorIndex = (title: string): number => {
   return Math.abs(hash) % 6
 }
 
-export default function BookCard({ book, loading = false, onClick }: BookCardProps) {
+export default function BookCard({ book, loading = false, onClick, titleNode, authorNode }: BookCardProps) {
   const navigate = useNavigate()
   const [imageError, setImageError] = useState(false)
   const primaryColor = usePrimaryColor()
@@ -183,7 +185,7 @@ export default function BookCard({ book, loading = false, onClick }: BookCardPro
             minHeight: '2.6em',
           }}
         >
-          {book.title}
+          {titleNode || book.title}
         </Typography>
         {book.author_name && (
           <Typography
@@ -197,7 +199,7 @@ export default function BookCard({ book, loading = false, onClick }: BookCardPro
               mt: 0.5,
             }}
           >
-            {book.author_name}
+            {authorNode || book.author_name}
           </Typography>
         )}
       </CardContent>

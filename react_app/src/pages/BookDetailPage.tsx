@@ -303,6 +303,10 @@ export default function BookDetailPage() {
   }
 
   const handleRead = () => {
+    if (!book?.file_format || book.file_format.toLowerCase() !== 'txt') {
+      alert('在线阅读仅支持 TXT 格式，请下载原文件')
+      return
+    }
     navigate(`/book/${id}/reader`)
   }
 
@@ -422,6 +426,7 @@ export default function BookDetailPage() {
 
   const hasProgress = readingProgress && readingProgress.progress > 0
   const progressPercent = readingProgress ? Math.round(readingProgress.progress * 100) : 0
+  const isTxtFormat = (book?.file_format || '').toLowerCase() === 'txt'
 
   return (
     <Box sx={{ p: 3 }}>
@@ -580,15 +585,27 @@ export default function BookDetailPage() {
 
           {/* 操作按钮 */}
           <Box sx={{ display: 'flex', gap: 2, mb: 4, flexWrap: 'wrap' }}>
-            <Button
-              variant="contained"
-              size="large"
-              startIcon={hasProgress ? <PlayArrow /> : <MenuBook />}
-              onClick={handleRead}
-              sx={{ flex: { xs: '1 1 100%', sm: '0 1 auto' }, minWidth: 180 }}
-            >
-              {hasProgress ? '继续阅读' : '开始阅读'}
-            </Button>
+            {isTxtFormat ? (
+              <Button
+                variant="contained"
+                size="large"
+                startIcon={hasProgress ? <PlayArrow /> : <MenuBook />}
+                onClick={handleRead}
+                sx={{ flex: { xs: '1 1 100%', sm: '0 1 auto' }, minWidth: 180 }}
+              >
+                {hasProgress ? '继续阅读' : '开始阅读'}
+              </Button>
+            ) : (
+              <Button
+                variant="outlined"
+                size="large"
+                startIcon={<MenuBook />}
+                disabled
+                sx={{ flex: { xs: '1 1 100%', sm: '0 1 auto' }, minWidth: 180 }}
+              >
+                仅TXT在线阅读
+              </Button>
+            )}
             <Button
               variant="outlined"
               size="large"

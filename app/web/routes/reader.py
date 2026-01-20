@@ -50,6 +50,9 @@ CHARS_PER_PAGE = 50000
 TXT_STREAM_CHUNK_SIZE = 512 * 1024
 TXT_MAX_CHAPTER_BYTES = 2 * 1024 * 1024
 TXT_FALLBACK_CHUNK_BYTES = 512 * 1024
+TXT_MAX_LINE_BUFFER_CHARS = 2 * 1024 * 1024
+TXT_LONG_LINE_FLUSH_CHARS = 256 * 1024
+TXT_BINARY_STRICT_MAX_BYTES = 5 * 1024 * 1024
 
 # MOBI 提取上限，防止异常文件导致崩溃/内存暴涨
 MOBI_MAX_TEXT_CHARS = 5_000_000
@@ -459,8 +462,12 @@ async def _read_txt_file_with_encoding(file_path: Path) -> tuple[Optional[str], 
         return None, None
 
     if _is_probably_binary_file(file_path):
-        log.error(f"疑似二进制文件，拒绝按TXT读取: {file_path}")
-        raise HTTPException(status_code=415, detail="疑似非文本文件，可能扩展名错误或文件损坏")
+        file_size = file_path.stat().st_size
+        if file_size > TXT_BINARY_STRICT_MAX_BYTES and file_path.suffix.lower() == ".txt":
+            log.warning(f"疑似二进制特征但文件较大，继续尝试按TXT读取: {file_path.name}")
+        else:
+            log.error(f"疑似二进制文件，拒绝按TXT读取: {file_path}")
+            raise HTTPException(status_code=415, detail="疑似非文本文件，可能扩展名错误或文件损坏")
 
     encoding = _detect_txt_encoding(file_path)
     if not encoding:
@@ -736,6 +743,24 @@ def _build_txt_cache_streaming(
 
     try:
         with open(file_path, 'rb') as src, open(tmp_text_path, 'wb') as dst:
+            def flush_long_segment(segment: str) -> None:
+                nonlocal total_length, total_bytes, prev_line, prev_blank, prev_start_offset, prev_start_byte
+                if not segment:
+                    return
+                line = _clean_txt_line(segment)
+                if not line:
+                    return
+                line_start_offset = total_length
+                line_start_byte = total_bytes
+                line_bytes = line.encode('utf-8')
+                dst.write(line_bytes)
+                total_length += len(line)
+                total_bytes += len(line_bytes)
+                prev_line = None
+                prev_blank = False
+                prev_start_offset = line_start_offset
+                prev_start_byte = line_start_byte
+
             while True:
                 chunk = src.read(TXT_STREAM_CHUNK_SIZE)
                 if not chunk:
@@ -754,6 +779,11 @@ def _build_txt_cache_streaming(
                     decoded = decoded[:-1]
                 decoded = decoded.replace('\r', '\n')
                 buffer += decoded
+
+                while '\n' not in buffer and len(buffer) > TXT_MAX_LINE_BUFFER_CHARS:
+                    flush_part = buffer[:TXT_LONG_LINE_FLUSH_CHARS]
+                    buffer = buffer[TXT_LONG_LINE_FLUSH_CHARS:]
+                    flush_long_segment(flush_part)
 
                 while '\n' in buffer:
                     line, buffer = buffer.split('\n', 1)
@@ -879,12 +909,17 @@ async def _ensure_txt_cache(file_path: Path) -> Optional[dict]:
             pass
         return None
     if binary_hint and not _is_text_sample_valid(file_path, encoding):
-        log.error(f"疑似二进制文件，拒绝按TXT读取: {file_path}")
-        try:
-            fail_marker.touch(exist_ok=True)
-        except Exception:
-            pass
-        raise HTTPException(status_code=415, detail="疑似非文本文件，可能扩展名错误或文件损坏")
+        file_size = file_path.stat().st_size
+        if file_size > TXT_BINARY_STRICT_MAX_BYTES and file_path.suffix.lower() == ".txt":
+            log.warning(f"疑似二进制特征但文件较大，继续尝试按TXT读取: {file_path.name}")
+            binary_hint = False
+        else:
+            log.error(f"疑似二进制文件，拒绝按TXT读取: {file_path}")
+            try:
+                fail_marker.touch(exist_ok=True)
+            except Exception:
+                pass
+            raise HTTPException(status_code=415, detail="疑似非文本文件，可能扩展名错误或文件损坏")
 
     cache_result = _build_txt_cache_streaming(file_path, text_path, index_path, encoding)
     if not cache_result:

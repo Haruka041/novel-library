@@ -172,6 +172,15 @@ export default function ReaderPage() {
   const stopToolbarTouch = (event: React.TouchEvent) => {
     event.stopPropagation()
   }
+
+  const handleDownload = () => {
+    const urlToken = token || getStoredToken()
+    if (!urlToken) {
+      alert('请先登录')
+      return
+    }
+    window.open(`/api/books/${id}/download?token=${encodeURIComponent(urlToken)}`, '_blank')
+  }
   
   // 漫画图片列表
   const [comicImages, setComicImages] = useState<ComicImage[]>([])
@@ -2084,6 +2093,7 @@ export default function ReaderPage() {
   }
 
   const currentTheme = themes[theme]
+  const isNonTxtFormat = bookInfo?.format ? !['txt', '.txt'].includes(bookInfo.format) : false
 
   if (loading) {
     return (
@@ -2107,7 +2117,7 @@ export default function ReaderPage() {
             </Typography>
           )}
         </Alert>
-        <Box sx={{ mt: 2, display: 'flex', gap: 2 }}>
+        <Box sx={{ mt: 2, display: 'flex', gap: 2, flexWrap: 'wrap' }}>
           <IconButton 
             onClick={() => {
               setError('')
@@ -2124,6 +2134,15 @@ export default function ReaderPage() {
             <RestartAlt sx={{ mr: 1 }} />
             <Typography variant="button">重试</Typography>
           </IconButton>
+          {isNonTxtFormat && (
+            <Button
+              variant="contained"
+              startIcon={<Download />}
+              onClick={handleDownload}
+            >
+              下载原文件
+            </Button>
+          )}
         </Box>
       </Box>
     )
