@@ -41,6 +41,17 @@ interface TagCategory {
   color: string;
 }
 
+const CATEGORY_COLORS = [
+  '#1976d2',
+  '#d32f2f',
+  '#388e3c',
+  '#f57c00',
+  '#7b1fa2',
+  '#0288d1',
+  '#455a64',
+  '#c2185b',
+];
+
 interface AutoTagDialogProps {
   open: boolean;
   onClose: () => void;
@@ -166,42 +177,13 @@ const TagsTab: React.FC = () => {
   const loadKeywords = async () => {
     setLoading(true);
     try {
-      // 模拟从后端加载关键词（实际应该有API端点）
-      // 这里直接使用硬编码的分类
-      const mockCategories: TagCategory[] = [
-        {
-          name: '题材分类',
-          color: '#1976d2',
-          tags: ['玄幻', '仙侠', '武侠', '都市', '历史', '军事', '科幻', '游戏', '竞技', '悬疑', '灵异', '同人'],
-        },
-        {
-          name: '热门元素',
-          color: '#d32f2f',
-          tags: ['系统', '重生', '穿越', '末世', '无限流', '爽文', '升级流', '种田', '宫斗', '商战'],
-        },
-        {
-          name: '风格特点',
-          color: '#388e3c',
-          tags: ['热血', '搞笑', '轻松', '虐文', '甜文', '爽文', '沙雕', '脑洞', '暗黑', '治愈'],
-        },
-        {
-          name: '受众定位',
-          color: '#f57c00',
-          tags: ['男频', '女频', '少儿', '青春', '轻小说', 'BL', 'GL', '无CP'],
-        },
-        {
-          name: '连载状态',
-          color: '#7b1fa2',
-          tags: ['连载', '完结', '断更', '太监', '日更', '周更'],
-        },
-        {
-          name: '特殊标记',
-          color: '#0288d1',
-          tags: ['签约', '精品', '畅销', 'IP改编', '原创', '翻译', '授权'],
-        },
-      ];
-      
-      setCategories(mockCategories);
+      const response = await api.get('/api/tags/keywords');
+      const fetched = response.data as Array<{ name: string; tags: string[] }>;
+      const mapped = fetched.map((category, index) => ({
+        ...category,
+        color: CATEGORY_COLORS[index % CATEGORY_COLORS.length],
+      }));
+      setCategories(mapped);
     } catch (err) {
       console.error('Failed to load keywords:', err);
     } finally {

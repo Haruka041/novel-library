@@ -121,6 +121,7 @@ export default function BookDetailPage() {
   const [allTags, setAllTags] = useState<TagInfo[]>([])
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([])
   const [savingTags, setSavingTags] = useState(false)
+  const [autoTagging, setAutoTagging] = useState(false)
   
   // 版本管理
   const [versionDialogOpen, setVersionDialogOpen] = useState(false)
@@ -152,6 +153,12 @@ export default function BookDetailPage() {
   useEffect(() => {
     loadAllTags()
   }, [])
+
+  useEffect(() => {
+    if (tagDialogOpen) {
+      setSelectedTagIds(book?.tags?.map((tag) => tag.id) || [])
+    }
+  }, [tagDialogOpen, book])
 
   const loadBook = async () => {
     try {
@@ -296,17 +303,57 @@ export default function BookDetailPage() {
     }
   }
 
+  const handleAutoTag = async () => {
+    try {
+      setAutoTagging(true)
+      const response = await api.post(`/api/admin/books/${id}/auto-tag`)
+      const newTags = response.data?.new_tags || []
+      await loadBook()
+      await loadAllTags()
+      if (!newTags.length) {
+        alert('未提取到新的标签')
+        return
+      }
+      alert(`已添加 ${newTags.length} 个标签：${newTags.join('、')}`)
+    } catch (err: any) {
+      console.error('自动打标签失败:', err)
+      alert(err.response?.data?.detail || '自动打标签失败')
+    } finally {
+      setAutoTagging(false)
+    }
+  }
+
   const formatFileSize = (bytes: number): string => {
     if (bytes < 1024) return bytes + ' B'
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
   }
 
-  const normalizeFormat = (value?: string | null) => (value || '').toLowerCase().replace('.', '').trim()
-  const isTxtLike = (value?: string | null) => normalizeFormat(value) === 'txt'
+  const normalizeFormat = (value?: string | null) => (value || '').toLowerCase().trim()
+  const extractExtension = (value?: string | null) => {
+    const normalized = normalizeFormat(value)
+    if (!normalized) return ''
+    const match = normalized.match(/\.([a-z0-9]+)$/)
+    if (match?.[1]) return match[1]
+    return normalized.replace(/^\./, '')
+  }
+  const isTxtLike = (value?: string | null) => extractExtension(value) === 'txt'
+  const getFormatCandidates = (target?: BookDetail | null) => {
+    if (!target) return []
+    const versionFormats = target.versions?.map((version) => version.file_format) || []
+    const versionNames = target.versions?.map((version) => version.file_name) || []
+    return [
+      target.file_format,
+      target.file_path,
+      ...(target.available_formats || []),
+      ...versionFormats,
+      ...versionNames
+    ]
+  }
+  const isTxtBook = (target?: BookDetail | null) => getFormatCandidates(target).some(isTxtLike)
 
   const handleRead = () => {
-    if (!isTxtLike(book?.file_format)) {
+    if (!isTxtBook(book)) {
       alert('在线阅读仅支持 TXT 格式，请下载原文件')
       return
     }
@@ -429,8 +476,7 @@ export default function BookDetailPage() {
 
   const hasProgress = readingProgress && readingProgress.progress > 0
   const progressPercent = readingProgress ? Math.round(readingProgress.progress * 100) : 0
-  const isTxtFormat = [book?.file_format, ...(book?.versions || []).map((version) => version.file_format)]
-    .some((format) => isTxtLike(format))
+  const isTxtFormat = isTxtBook(book)
 
   return (
     <Box sx={{ p: 3 }}>
@@ -831,6 +877,20 @@ export default function BookDetailPage() {
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             选择要应用到此书籍的标签
           </Typography>
+
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={handleAutoTag}
+              disabled={autoTagging}
+            >
+              {autoTagging ? '智能分析中...' : '智能建议'}
+            </Button>
+            <Typography variant="caption" color="text.secondary">
+              基于书名、作者、文件名与内容关键词
+            </Typography>
+          </Box>
           
           {allTags.length === 0 ? (
             <Alert severity="info">暂无可用标签，请先在管理后台创建标签。</Alert>

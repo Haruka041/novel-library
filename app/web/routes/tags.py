@@ -50,6 +50,12 @@ class BlockedTagsUpdate(BaseModel):
     blocked_tag_ids: List[int]
 
 
+class TagKeywordCategory(BaseModel):
+    """标签关键词分类"""
+    name: str
+    tags: List[str]
+
+
 # ===== 标签管理 =====
 
 @router.post("/tags/init-defaults")
@@ -144,6 +150,26 @@ async def init_default_tags(
         "total_predefined": len(predefined_tags),
         "created_tags": created_tags
     }
+
+
+@router.get("/tags/keywords", response_model=List[TagKeywordCategory])
+async def get_tag_keywords(
+    admin: User = Depends(get_current_admin)
+):
+    """
+    获取内置标签关键词分类（管理员）
+    """
+    from app.core.tag_keywords import get_all_categories, get_tags_by_category
+
+    categories = []
+    for category in get_all_categories():
+        tags_map = get_tags_by_category(category)
+        categories.append({
+            "name": category,
+            "tags": list(tags_map.keys())
+        })
+
+    return categories
 
 
 @router.post("/tags", response_model=TagResponse)
