@@ -1,5 +1,5 @@
 import { Box, Typography, Card, CardContent, Avatar, Divider, List, ListItem, ListItemIcon, ListItemText, Chip, Button, Snackbar, Alert, Dialog, DialogTitle, DialogContent, DialogActions, TextField } from '@mui/material'
-import { Person, Lock, History, Favorite, Logout, TrendingUp, FormatQuote, Settings } from '@mui/icons-material'
+import { Person, Lock, History, Favorite, Logout, TrendingUp, FormatQuote, Settings, Info } from '@mui/icons-material'
 import { useAuthStore } from '../stores/authStore'
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -148,6 +148,13 @@ export default function ProfilePage() {
               <TrendingUp />
             </ListItemIcon>
             <ListItemText primary="阅读统计" secondary="查看阅读时长和习惯分析" />
+          </ListItem>
+          <Divider />
+          <ListItem button onClick={() => navigate('/about')}>
+            <ListItemIcon>
+              <Info />
+            </ListItemIcon>
+            <ListItemText primary="关于 Sooklib" secondary="项目信息与链接" />
           </ListItem>
           <Divider />
           <ListItem button onClick={logout}>
