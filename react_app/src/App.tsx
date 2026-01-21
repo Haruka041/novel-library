@@ -18,6 +18,7 @@ import FavoritesPage from './pages/FavoritesPage'
 import HistoryPage from './pages/HistoryPage'
 import ReadingStatsPage from './pages/ReadingStatsPage'
 import AuthorsPage from './pages/AuthorsPage'
+import AnnotationsPage from './pages/AnnotationsPage'
 
 // 需要认证的路由守卫
 const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
@@ -110,6 +111,7 @@ function App() {
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/stats" element={<ReadingStatsPage />} />
           <Route path="/authors" element={<AuthorsPage />} />
+          <Route path="/annotations" element={<AnnotationsPage />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/admin" element={<AdminPage />} />
           <Route path="/admin/:section" element={<AdminPage />} />

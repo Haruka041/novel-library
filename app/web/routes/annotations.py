@@ -6,7 +6,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, and_, func
+from sqlalchemy import select, and_, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -64,6 +64,23 @@ class AnnotationExport(BaseModel):
     total_annotations: int
     annotations: List[AnnotationResponse]
     exported_at: datetime
+
+
+class AnnotationListItem(BaseModel):
+    """批注列表项"""
+    id: int
+    book_id: int
+    book_title: str
+    chapter_index: int
+    chapter_title: Optional[str]
+    selected_text: str
+    note: Optional[str]
+    annotation_type: str
+    color: str
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 # ============== API 路由 ==============
@@ -386,6 +403,83 @@ async def get_recent_annotations(
     annotations = result.scalars().all()
     
     return annotations
+
+
+@router.get("/my")
+async def list_my_annotations(
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=50, ge=1, le=200),
+    book_id: Optional[int] = None,
+    keyword: Optional[str] = None,
+    annotation_type: Optional[str] = None,
+    color: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    获取用户批注列表（支持筛选与分页）
+    """
+    conditions = [Annotation.user_id == current_user.id]
+
+    if book_id is not None:
+        conditions.append(Annotation.book_id == book_id)
+
+    if annotation_type:
+        conditions.append(Annotation.annotation_type == annotation_type)
+
+    if color:
+        conditions.append(Annotation.color == color)
+
+    if keyword:
+        keyword_like = f"%{keyword}%"
+        conditions.append(or_(
+            Annotation.selected_text.ilike(keyword_like),
+            Annotation.note.ilike(keyword_like),
+            Book.title.ilike(keyword_like)
+        ))
+
+    count_stmt = select(func.count(Annotation.id)).select_from(Annotation).join(
+        Book, Annotation.book_id == Book.id
+    ).where(and_(*conditions))
+    result = await db.execute(count_stmt)
+    total = result.scalar() or 0
+
+    stmt = (
+        select(Annotation, Book)
+        .join(Book, Annotation.book_id == Book.id)
+        .where(and_(*conditions))
+        .order_by(Annotation.updated_at.desc())
+        .limit(limit)
+        .offset((page - 1) * limit)
+    )
+
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    items = []
+    for annotation, book in rows:
+        items.append({
+            "id": annotation.id,
+            "book_id": book.id,
+            "book_title": book.title,
+            "chapter_index": annotation.chapter_index,
+            "chapter_title": annotation.chapter_title,
+            "selected_text": annotation.selected_text,
+            "note": annotation.note,
+            "annotation_type": annotation.annotation_type,
+            "color": annotation.color,
+            "updated_at": annotation.updated_at
+        })
+
+    total_pages = (total + limit - 1) // limit if total else 0
+
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "total_pages": total_pages
+    }
 
 
 @router.delete("/book/{book_id}/all")
