@@ -1,7 +1,8 @@
 """
 AI 推荐与对话式找书
 """
-from typing import List, Optional
+import json
+from typing import List, Optional, Dict, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -13,13 +14,17 @@ from app.database import get_db
 from app.models import (
     Book,
     BookTag,
+    Tag,
     User,
     UserFavorite,
     ReadingProgress,
+    Author,
     BookVersion,
 )
 from app.utils.permissions import check_book_access, get_accessible_library_ids
 from app.web.routes.auth import get_current_user
+from app.core.ai.config import ai_config
+from app.core.ai.service import get_ai_service
 
 
 router = APIRouter()
@@ -33,6 +38,18 @@ class RecommendationItem(BaseModel):
     file_size: int
     added_at: str
     score: float
+
+
+class ChatSearchRequest(BaseModel):
+    query: str
+    limit: int = 20
+    library_id: Optional[int] = None
+
+
+class ChatSearchResponse(BaseModel):
+    parsed: Dict[str, Any]
+    books: List[Dict[str, Any]]
+    total: int
 
 
 def _get_primary_version(book: Book) -> Optional[BookVersion]:
@@ -161,3 +178,136 @@ async def get_recommendations(
 
     recommendations.sort(key=lambda item: (item.score, item.added_at), reverse=True)
     return recommendations[:limit]
+
+
+@router.post("/chat-search", response_model=ChatSearchResponse)
+async def chat_search(
+    request: ChatSearchRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    对话式找书：将自然语言解析为检索条件
+    """
+    if not request.query.strip():
+        raise HTTPException(status_code=400, detail="搜索内容不能为空")
+
+    parsed: Dict[str, Any] = {
+        "keywords": request.query.strip(),
+        "author": None,
+        "tags": [],
+        "formats": [],
+        "library_id": request.library_id,
+    }
+
+    if ai_config.is_enabled():
+        prompt = f"""你是一个书籍检索助手。请把用户描述解析成检索条件，只返回JSON。
+用户描述: {request.query}
+
+返回JSON格式（字段可为空）:
+{{
+  "keywords": "核心关键词",
+  "author": "作者名或null",
+  "tags": ["标签1", "标签2"],
+  "formats": ["txt","epub","pdf"],
+  "library_id": null
+}}
+要求:
+1. 只返回JSON
+2. formats 必须是小写扩展名，不带点
+"""
+        ai_service = get_ai_service()
+        response = await ai_service.chat(
+            messages=[
+                {"role": "system", "content": "只返回JSON格式，不要解释。"},
+                {"role": "user", "content": prompt},
+            ]
+        )
+        if response.success:
+            content = response.content
+            start = content.find("{")
+            end = content.rfind("}") + 1
+            if start >= 0 and end > start:
+                try:
+                    parsed = json.loads(content[start:end])
+                except Exception:
+                    parsed = parsed
+
+    keywords = (parsed.get("keywords") or "").strip()
+    author_name = (parsed.get("author") or "").strip()
+    tags = [t for t in (parsed.get("tags") or []) if isinstance(t, str)]
+    formats = [f for f in (parsed.get("formats") or []) if isinstance(f, str)]
+
+    accessible_library_ids = await get_accessible_library_ids(current_user, db)
+    if not accessible_library_ids:
+        return {"parsed": parsed, "books": [], "total": 0}
+
+    if request.library_id and request.library_id in accessible_library_ids:
+        accessible_library_ids = [request.library_id]
+
+    query = select(Book).options(
+        joinedload(Book.author),
+        joinedload(Book.book_tags).joinedload(BookTag.tag),
+        joinedload(Book.versions),
+    )
+    query = query.where(Book.library_id.in_(accessible_library_ids))
+
+    if keywords:
+        search_term = f"%{keywords}%"
+        query = query.outerjoin(Author, Book.author_id == Author.id)
+        query = query.where(
+            or_(
+                Book.title.like(search_term),
+                Author.name.like(search_term),
+            )
+        )
+
+    if author_name:
+        author_result = await db.execute(
+            select(Author).where(Author.name.like(f"%{author_name}%"))
+        )
+        author = author_result.scalars().first()
+        if author:
+            query = query.where(Book.author_id == author.id)
+
+    if formats:
+        normalized = []
+        for fmt in formats:
+            cleaned = fmt.lower().replace(".", "").strip()
+            if cleaned:
+                normalized.append(f".{cleaned}")
+                normalized.append(cleaned)
+        if normalized:
+            query = query.outerjoin(BookVersion).where(BookVersion.file_format.in_(normalized))
+
+    if tags:
+        query = query.outerjoin(BookTag).outerjoin(Tag).where(Tag.name.in_(tags))
+
+    query = query.order_by(Book.added_at.desc()).limit(request.limit * 3)
+    result = await db.execute(query)
+    all_books = result.unique().scalars().all()
+
+    filtered_books = []
+    for book in all_books:
+        if await check_book_access(current_user, book.id, db):
+            filtered_books.append(book)
+
+    response_books = []
+    for book in filtered_books[: request.limit]:
+        primary = _get_primary_version(book)
+        response_books.append(
+            {
+                "id": book.id,
+                "title": book.title,
+                "author_name": book.author.name if book.author else None,
+                "file_format": primary.file_format if primary else "unknown",
+                "file_size": primary.file_size if primary else 0,
+                "added_at": book.added_at.isoformat(),
+            }
+        )
+
+    return {
+        "parsed": parsed,
+        "books": response_books,
+        "total": len(filtered_books),
+    }
