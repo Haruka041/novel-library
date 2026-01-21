@@ -56,6 +56,11 @@ class TagKeywordCategory(BaseModel):
     tags: List[str]
 
 
+class TagKeywordUpdate(BaseModel):
+    """更新标签关键词库"""
+    categories: dict
+
+
 # ===== 标签管理 =====
 
 @router.post("/tags/init-defaults")
@@ -159,17 +164,50 @@ async def get_tag_keywords(
     """
     获取内置标签关键词分类（管理员）
     """
-    from app.core.tag_keywords import get_all_categories, get_tags_by_category
+    from app.core.tag_keywords import get_keyword_map
 
-    categories = []
-    for category in get_all_categories():
-        tags_map = get_tags_by_category(category)
-        categories.append({
-            "name": category,
-            "tags": list(tags_map.keys())
-        })
+    keyword_map = get_keyword_map()
+    categories = [
+        {"name": category, "tags": list(tag_dict.keys())}
+        for category, tag_dict in keyword_map.items()
+    ]
 
     return categories
+
+
+@router.get("/tags/keywords/raw")
+async def get_tag_keywords_raw(
+    admin: User = Depends(get_current_admin)
+):
+    """
+    获取完整标签关键词库（管理员）
+    """
+    from app.core.tag_keywords import get_keyword_map
+
+    return {
+        "categories": get_keyword_map()
+    }
+
+
+@router.put("/tags/keywords")
+async def update_tag_keywords(
+    request: TagKeywordUpdate,
+    admin: User = Depends(get_current_admin)
+):
+    """
+    更新标签关键词库（管理员）
+    """
+    from app.core.tag_keywords import update_keywords
+
+    try:
+        keyword_map = update_keywords(request.categories)
+        return {
+            "message": "标签关键词库已更新",
+            "category_count": len(keyword_map),
+            "tag_count": sum(len(tag_dict) for tag_dict in keyword_map.values())
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.post("/tags", response_model=TagResponse)

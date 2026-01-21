@@ -2,9 +2,14 @@
 标签关键词库
 用于从文件名和内容自动提取标签
 """
+import json
+from pathlib import Path
+from typing import Dict, List
 
-# 内置标签关键词库
-TAG_KEYWORDS = {
+DATA_PATH = Path("data/tag_keywords.json")
+
+# 内置标签关键词库（默认）
+DEFAULT_TAG_KEYWORDS: Dict[str, Dict[str, List[str]]] = {
     "题材": {
         "玄幻": ["玄幻", "修仙", "修真", "仙侠", "异世", "洪荒"],
         "都市": ["都市", "现代", "都市言情", "都市异能"],
@@ -61,6 +66,63 @@ TAG_KEYWORDS = {
         "EPUB": ["epub"],
     }
 }
+
+TAG_KEYWORDS: Dict[str, Dict[str, List[str]]] = {}
+
+
+def _normalize_keywords(data: dict) -> Dict[str, Dict[str, List[str]]]:
+    normalized: Dict[str, Dict[str, List[str]]] = {}
+    for category, tag_dict in (data or {}).items():
+        if not isinstance(tag_dict, dict):
+            continue
+        cleaned_tags: Dict[str, List[str]] = {}
+        for tag_name, keywords in tag_dict.items():
+            if not isinstance(tag_name, str):
+                continue
+            if not isinstance(keywords, list):
+                continue
+            cleaned = [kw for kw in keywords if isinstance(kw, str) and kw.strip()]
+            if cleaned:
+                cleaned_tags[tag_name] = cleaned
+        if cleaned_tags:
+            normalized[category] = cleaned_tags
+    return normalized
+
+
+def _load_keywords() -> Dict[str, Dict[str, List[str]]]:
+    if DATA_PATH.exists():
+        try:
+            with open(DATA_PATH, "r", encoding="utf-8") as file:
+                data = json.load(file)
+            normalized = _normalize_keywords(data)
+            if normalized:
+                return normalized
+        except Exception:
+            pass
+    return DEFAULT_TAG_KEYWORDS
+
+
+def reload_keywords() -> None:
+    global TAG_KEYWORDS
+    TAG_KEYWORDS = _load_keywords()
+
+
+def update_keywords(data: dict) -> Dict[str, Dict[str, List[str]]]:
+    normalized = _normalize_keywords(data)
+    if not normalized:
+        raise ValueError("关键词库为空或格式不正确")
+    DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(DATA_PATH, "w", encoding="utf-8") as file:
+        json.dump(normalized, file, ensure_ascii=False, indent=2)
+    reload_keywords()
+    return TAG_KEYWORDS
+
+
+def get_keyword_map() -> Dict[str, Dict[str, List[str]]]:
+    return TAG_KEYWORDS
+
+
+reload_keywords()
 
 
 def get_tags_from_filename(filename: str) -> list[str]:

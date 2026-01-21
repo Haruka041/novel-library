@@ -32,6 +32,8 @@ import {
   Info as InfoIcon,
   Download as ImportIcon,
   Add as AddIcon,
+  UploadFile as UploadIcon,
+  FileDownload as ExportIcon,
 } from '@mui/icons-material';
 import api from '../../services/api';
 
@@ -169,6 +171,8 @@ const TagsTab: React.FC = () => {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [newTagName, setNewTagName] = useState('');
   const [creating, setCreating] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   useEffect(() => {
     loadKeywords();
@@ -233,6 +237,46 @@ const TagsTab: React.FC = () => {
     }
   };
 
+  const handleExportKeywords = async () => {
+    try {
+      setExporting(true);
+      const response = await api.get('/api/tags/keywords/raw');
+      const data = response.data;
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'tag-keywords.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      alert('导出失败: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleImportKeywords = async (file?: File) => {
+    if (!file) return;
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      if (!parsed?.categories) {
+        throw new Error('缺少 categories 字段');
+      }
+      await api.put('/api/tags/keywords', { categories: parsed.categories });
+      await loadKeywords();
+      alert('导入成功');
+    } catch (err: any) {
+      alert('导入失败: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setImporting(false);
+    }
+  };
+
   if (loading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 400 }}>
@@ -256,6 +300,28 @@ const TagsTab: React.FC = () => {
             onClick={loadKeywords}
           >
             刷新
+          </Button>
+          <Button
+            variant="outlined"
+            startIcon={exporting ? <CircularProgress size={20} /> : <ExportIcon />}
+            onClick={handleExportKeywords}
+            disabled={exporting}
+          >
+            {exporting ? '导出中...' : '导出关键词库'}
+          </Button>
+          <Button
+            variant="outlined"
+            startIcon={importing ? <CircularProgress size={20} /> : <UploadIcon />}
+            component="label"
+            disabled={importing}
+          >
+            {importing ? '导入中...' : '导入关键词库'}
+            <input
+              hidden
+              type="file"
+              accept="application/json"
+              onChange={(e) => handleImportKeywords(e.target.files?.[0])}
+            />
           </Button>
           <Button
             variant="outlined"
