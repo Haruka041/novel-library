@@ -302,8 +302,11 @@ export default function BookDetailPage() {
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
   }
 
+  const normalizeFormat = (value?: string | null) => (value || '').toLowerCase().replace('.', '').trim()
+  const isTxtLike = (value?: string | null) => normalizeFormat(value) === 'txt'
+
   const handleRead = () => {
-    if (!book?.file_format || book.file_format.toLowerCase() !== 'txt') {
+    if (!isTxtLike(book?.file_format)) {
       alert('在线阅读仅支持 TXT 格式，请下载原文件')
       return
     }
@@ -426,7 +429,8 @@ export default function BookDetailPage() {
 
   const hasProgress = readingProgress && readingProgress.progress > 0
   const progressPercent = readingProgress ? Math.round(readingProgress.progress * 100) : 0
-  const isTxtFormat = (book?.file_format || '').toLowerCase() === 'txt'
+  const isTxtFormat = [book?.file_format, ...(book?.versions || []).map((version) => version.file_format)]
+    .some((format) => isTxtLike(format))
 
   return (
     <Box sx={{ p: 3 }}>
