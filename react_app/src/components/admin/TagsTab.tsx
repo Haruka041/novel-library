@@ -34,6 +34,7 @@ import {
   Add as AddIcon,
   UploadFile as UploadIcon,
   FileDownload as ExportIcon,
+  Tune as RuleIcon,
 } from '@mui/icons-material';
 import api from '../../services/api';
 
@@ -173,10 +174,21 @@ const TagsTab: React.FC = () => {
   const [creating, setCreating] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [ruleDialogOpen, setRuleDialogOpen] = useState(false);
+  const [ruleText, setRuleText] = useState('');
+  const [ruleLoading, setRuleLoading] = useState(false);
+  const [ruleSaving, setRuleSaving] = useState(false);
+  const [ruleError, setRuleError] = useState('');
 
   useEffect(() => {
     loadKeywords();
   }, []);
+
+  useEffect(() => {
+    if (ruleDialogOpen) {
+      loadRuleText();
+    }
+  }, [ruleDialogOpen]);
 
   const loadKeywords = async () => {
     setLoading(true);
@@ -277,6 +289,57 @@ const TagsTab: React.FC = () => {
     }
   };
 
+  const loadRuleText = async () => {
+    setRuleLoading(true);
+    setRuleError('');
+    try {
+      const response = await api.get('/api/tags/keywords/raw');
+      const categories = response.data?.categories || {};
+      setRuleText(JSON.stringify(categories, null, 2));
+    } catch (err: any) {
+      setRuleError(err.response?.data?.detail || '加载规则失败');
+    } finally {
+      setRuleLoading(false);
+    }
+  };
+
+  const handleFormatRules = () => {
+    try {
+      const parsed = JSON.parse(ruleText);
+      setRuleText(JSON.stringify(parsed, null, 2));
+      setRuleError('');
+    } catch (err) {
+      setRuleError('JSON 格式错误，无法格式化');
+    }
+  };
+
+  const handleSaveRules = async () => {
+    setRuleSaving(true);
+    setRuleError('');
+    let parsed: any;
+    try {
+      parsed = JSON.parse(ruleText);
+      if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+        throw new Error('规则格式必须是对象结构');
+      }
+    } catch (err: any) {
+      setRuleError(err.message || 'JSON 解析失败');
+      setRuleSaving(false);
+      return;
+    }
+
+    try {
+      await api.put('/api/tags/keywords', { categories: parsed });
+      await loadKeywords();
+      setRuleDialogOpen(false);
+      alert('规则已保存');
+    } catch (err: any) {
+      setRuleError(err.response?.data?.detail || '保存失败');
+    } finally {
+      setRuleSaving(false);
+    }
+  };
+
   if (loading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 400 }}>
@@ -331,6 +394,13 @@ const TagsTab: React.FC = () => {
             disabled={initLoading}
           >
             {initLoading ? '导入中...' : '导入预定义标签'}
+          </Button>
+          <Button
+            variant="outlined"
+            startIcon={<RuleIcon />}
+            onClick={() => setRuleDialogOpen(true)}
+          >
+            规则配置
           </Button>
           <Button
             variant="contained"
@@ -461,6 +531,49 @@ const TagsTab: React.FC = () => {
         onClose={() => setAutoTagDialogOpen(false)}
         onSuccess={loadKeywords}
       />
+
+      {/* 自动打标规则配置对话框 */}
+      <Dialog open={ruleDialogOpen} onClose={() => setRuleDialogOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>自动打标规则配置</DialogTitle>
+        <DialogContent>
+          {ruleError && <Alert severity="error" sx={{ mb: 2 }}>{ruleError}</Alert>}
+          <Alert severity="info" sx={{ mb: 2 }}>
+            这里直接编辑关键词规则（JSON）。结构为：分类 → 标签 → 关键词数组。
+            修改后保存即可生效。若格式错误会提示。
+          </Alert>
+          {ruleLoading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 240 }}>
+              <CircularProgress />
+            </Box>
+          ) : (
+            <TextField
+              fullWidth
+              multiline
+              minRows={12}
+              value={ruleText}
+              onChange={(e) => setRuleText(e.target.value)}
+              placeholder='{\n  "题材": {\n    "玄幻": ["玄幻", "修仙"]\n  }\n}'
+            />
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRuleDialogOpen(false)}>取消</Button>
+          <Button onClick={loadRuleText} disabled={ruleLoading || ruleSaving}>
+            重新加载
+          </Button>
+          <Button onClick={handleFormatRules} disabled={ruleLoading || ruleSaving}>
+            格式化
+          </Button>
+          <Button
+            onClick={handleSaveRules}
+            variant="contained"
+            disabled={ruleLoading || ruleSaving}
+            startIcon={ruleSaving ? <CircularProgress size={20} /> : undefined}
+          >
+            {ruleSaving ? '保存中...' : '保存'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* 新建标签对话框 */}
       <Dialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} maxWidth="xs" fullWidth>
