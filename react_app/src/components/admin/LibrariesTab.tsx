@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   Box, Typography, Button, IconButton, Chip, Dialog, DialogTitle,
   DialogContent, DialogActions, TextField, Alert, CircularProgress,
@@ -15,6 +15,7 @@ import {
   AutoFixHigh, Subject, CleaningServices
 } from '@mui/icons-material'
 import api from '../../services/api'
+import { wsService } from '../../services/ws'
 
 interface Library {
   id: number
@@ -862,85 +863,7 @@ export default function LibrariesTab() {
     return colors[rating] || 'default'
   }
 
-  // WebSocket 连接和轮询活动任务
-  useEffect(() => {
-    // 建立 WebSocket 连接
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${protocol}//${window.location.host}/ws`
-    
-    let ws: WebSocket | null = null;
-    let reconnectTimeout: any = null;
-
-    const connectWs = () => {
-      ws = new WebSocket(wsUrl);
-      
-      ws.onopen = () => {
-        console.log('WebSocket connected');
-      };
-      
-      ws.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data);
-          if (message.type === 'scan_progress') {
-            const task = message as ScanTask & { type: string };
-            const libraryId = task.library_id;
-            
-            // 更新活动任务状态
-            setActiveTasks(prev => {
-              if (task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') {
-                // 任务完成，移除活动任务并刷新历史
-                const newTasks = { ...prev };
-                delete newTasks[libraryId];
-                
-                // 延迟一点刷新历史，确保后端数据已提交
-                setTimeout(() => {
-                  loadLibraries();
-                  loadTaskHistory(libraryId);
-                }, 500);
-                
-                return newTasks;
-              }
-              return { ...prev, [libraryId]: task };
-            });
-          }
-        } catch (e) {
-          console.error('WebSocket message parse error:', e);
-        }
-      };
-      
-      ws.onclose = () => {
-        console.log('WebSocket disconnected, reconnecting in 5s...');
-        reconnectTimeout = setTimeout(connectWs, 5000);
-      };
-
-      ws.onerror = (err) => {
-        console.error('WebSocket error:', err);
-        ws?.close();
-      };
-    };
-
-    connectWs();
-
-    // 依然保留轮询作为后备，但频率降低
-    const hasActiveTasks = Object.values(activeTasks).some(
-      task => task.status === 'running' || task.status === 'pending'
-    );
-    
-    let interval: any = null;
-    if (hasActiveTasks) {
-      interval = setInterval(() => {
-        updateActiveTasks();
-      }, 10000); // 每10秒轮询一次作为后备
-    }
-    
-    return () => {
-      if (ws) ws.close();
-      if (reconnectTimeout) clearTimeout(reconnectTimeout);
-      if (interval) clearInterval(interval);
-    };
-  }, [activeTasks]) // 依赖 activeTasks 以便在任务状态变化时更新轮询逻辑
-
-  const loadLibraries = async () => {
+  const loadLibraries = useCallback(async () => {
     try {
       setLoading(true)
       setError('')
@@ -965,7 +888,7 @@ export default function LibrariesTab() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
   const loadLibraryPaths = async (libraryId: number) => {
     try {
@@ -976,7 +899,7 @@ export default function LibrariesTab() {
     }
   }
 
-  const loadTaskHistory = async (libraryId: number) => {
+  const loadTaskHistory = useCallback(async (libraryId: number) => {
     try {
       const response = await api.get<ScanTask[]>(`/api/admin/libraries/${libraryId}/scan-tasks?limit=5`)
       setTaskHistories(prev => ({ ...prev, [libraryId]: response.data }))
@@ -989,9 +912,9 @@ export default function LibrariesTab() {
     } catch (err) {
       console.error('加载任务历史失败:', err)
     }
-  }
+  }, [])
 
-  const updateActiveTasks = async () => {
+  const updateActiveTasks = useCallback(async () => {
     const taskIds = Object.values(activeTasks).map(t => t.id)
     
     for (const taskId of taskIds) {
@@ -1015,7 +938,52 @@ export default function LibrariesTab() {
         console.error('更新任务状态失败:', err)
       }
     }
-  }
+  }, [activeTasks, loadLibraries, loadTaskHistory])
+
+  // WebSocket 实时推送扫描进度
+  useEffect(() => {
+    const handleScanProgress = (message: any) => {
+      if (message?.type !== 'scan_progress') return
+      const task = message as ScanTask & { type: string }
+      const libraryId = task.library_id
+
+      setActiveTasks(prev => {
+        if (task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') {
+          const newTasks = { ...prev }
+          delete newTasks[libraryId]
+          setTimeout(() => {
+            loadLibraries()
+            loadTaskHistory(libraryId)
+          }, 500)
+          return newTasks
+        }
+        return { ...prev, [libraryId]: task }
+      })
+    }
+
+    wsService.connect()
+    wsService.on('scan_progress', handleScanProgress)
+
+    return () => {
+      wsService.off('scan_progress', handleScanProgress)
+    }
+  }, [loadLibraries, loadTaskHistory])
+
+  // 轮询作为后备（低频）
+  useEffect(() => {
+    const hasActiveTasks = Object.values(activeTasks).some(
+      task => task.status === 'running' || task.status === 'pending'
+    )
+    if (!hasActiveTasks) return
+
+    const interval = setInterval(() => {
+      updateActiveTasks()
+    }, 10000)
+
+    return () => {
+      clearInterval(interval)
+    }
+  }, [activeTasks, updateActiveTasks])
 
   const handleExpandLibrary = async (libraryId: number) => {
     if (expandedLibrary === libraryId) {
