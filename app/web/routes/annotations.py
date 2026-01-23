@@ -203,99 +203,6 @@ async def get_chapter_annotations(
     return annotations
 
 
-@router.get("/{annotation_id}", response_model=AnnotationResponse)
-async def get_annotation(
-    annotation_id: int,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """
-    获取单个批注详情
-    """
-    stmt = select(Annotation).where(
-        and_(
-            Annotation.id == annotation_id,
-            Annotation.user_id == current_user.id
-        )
-    )
-    result = await db.execute(stmt)
-    annotation = result.scalar_one_or_none()
-    
-    if not annotation:
-        raise HTTPException(status_code=404, detail="批注不存在")
-    
-    return annotation
-
-
-@router.put("/{annotation_id}", response_model=AnnotationResponse)
-async def update_annotation(
-    annotation_id: int,
-    data: AnnotationUpdate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """
-    更新批注（笔记内容、颜色等）
-    """
-    stmt = select(Annotation).where(
-        and_(
-            Annotation.id == annotation_id,
-            Annotation.user_id == current_user.id
-        )
-    )
-    result = await db.execute(stmt)
-    annotation = result.scalar_one_or_none()
-    
-    if not annotation:
-        raise HTTPException(status_code=404, detail="批注不存在")
-    
-    # 更新字段
-    if data.note is not None:
-        annotation.note = data.note
-        if data.note.strip():
-            annotation.annotation_type = "note"  # 有笔记内容则设为 note 类型
-    
-    if data.color:
-        annotation.color = data.color
-    
-    if data.annotation_type:
-        annotation.annotation_type = data.annotation_type
-    
-    annotation.updated_at = datetime.utcnow()
-    
-    await db.commit()
-    await db.refresh(annotation)
-    
-    return annotation
-
-
-@router.delete("/{annotation_id}")
-async def delete_annotation(
-    annotation_id: int,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """
-    删除批注
-    """
-    stmt = select(Annotation).where(
-        and_(
-            Annotation.id == annotation_id,
-            Annotation.user_id == current_user.id
-        )
-    )
-    result = await db.execute(stmt)
-    annotation = result.scalar_one_or_none()
-    
-    if not annotation:
-        raise HTTPException(status_code=404, detail="批注不存在")
-    
-    await db.delete(annotation)
-    await db.commit()
-    
-    return {"message": "批注已删除"}
-
-
 @router.get("/book/{book_id}/export", response_model=AnnotationExport)
 async def export_book_annotations(
     book_id: int,
@@ -480,6 +387,99 @@ async def list_my_annotations(
         "limit": limit,
         "total_pages": total_pages
     }
+
+
+@router.get("/{annotation_id}", response_model=AnnotationResponse)
+async def get_annotation(
+    annotation_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    获取单个批注详情
+    """
+    stmt = select(Annotation).where(
+        and_(
+            Annotation.id == annotation_id,
+            Annotation.user_id == current_user.id
+        )
+    )
+    result = await db.execute(stmt)
+    annotation = result.scalar_one_or_none()
+    
+    if not annotation:
+        raise HTTPException(status_code=404, detail="批注不存在")
+    
+    return annotation
+
+
+@router.put("/{annotation_id}", response_model=AnnotationResponse)
+async def update_annotation(
+    annotation_id: int,
+    data: AnnotationUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    更新批注（笔记内容、颜色等）
+    """
+    stmt = select(Annotation).where(
+        and_(
+            Annotation.id == annotation_id,
+            Annotation.user_id == current_user.id
+        )
+    )
+    result = await db.execute(stmt)
+    annotation = result.scalar_one_or_none()
+    
+    if not annotation:
+        raise HTTPException(status_code=404, detail="批注不存在")
+    
+    # 更新字段
+    if data.note is not None:
+        annotation.note = data.note
+        if data.note.strip():
+            annotation.annotation_type = "note"  # 有笔记内容则设为 note 类型
+    
+    if data.color:
+        annotation.color = data.color
+    
+    if data.annotation_type:
+        annotation.annotation_type = data.annotation_type
+    
+    annotation.updated_at = datetime.utcnow()
+    
+    await db.commit()
+    await db.refresh(annotation)
+    
+    return annotation
+
+
+@router.delete("/{annotation_id}")
+async def delete_annotation(
+    annotation_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    删除批注
+    """
+    stmt = select(Annotation).where(
+        and_(
+            Annotation.id == annotation_id,
+            Annotation.user_id == current_user.id
+        )
+    )
+    result = await db.execute(stmt)
+    annotation = result.scalar_one_or_none()
+    
+    if not annotation:
+        raise HTTPException(status_code=404, detail="批注不存在")
+    
+    await db.delete(annotation)
+    await db.commit()
+    
+    return {"message": "批注已删除"}
 
 
 @router.delete("/book/{book_id}/all")
