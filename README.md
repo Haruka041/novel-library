@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="react_app/public/icon.png" alt="Sooklib" width="120" />
+</p>
+
 # Sooklib - 书城/书库管理系统
 
 Sooklib 是一个以书库为核心、对标 Emby 的书城/书库项目，强调管理、发现与持续阅读体验。
