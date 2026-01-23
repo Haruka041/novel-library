@@ -17,7 +17,7 @@ from app.models import (
     BookTag,
     Tag,
     User,
-    UserFavorite,
+    Favorite,
     ReadingProgress,
     Author,
     BookVersion,
@@ -294,7 +294,7 @@ async def get_recommendations(
         accessible_library_ids = [library_id]
 
     favorite_result = await db.execute(
-        select(UserFavorite.book_id).where(UserFavorite.user_id == current_user.id)
+        select(Favorite.book_id).where(Favorite.user_id == current_user.id)
     )
     favorite_ids = {row[0] for row in favorite_result.all()}
 
@@ -548,7 +548,7 @@ async def generate_reading_lists(
         accessible_library_ids = [request.library_id]
 
     favorite_result = await db.execute(
-        select(UserFavorite.book_id).where(UserFavorite.user_id == current_user.id)
+        select(Favorite.book_id).where(Favorite.user_id == current_user.id)
     )
     favorite_ids = {row[0] for row in favorite_result.all()}
 
