@@ -901,6 +901,25 @@ export default function ReaderPage() {
     }
   }
 
+  const cacheHintMessage = '可尝试清理 TXT 缓存后重试（删除 /app/data/cache/txt 或重启服务）'
+  const appendCacheHint = (detail?: string | null) => {
+    if (!detail) return cacheHintMessage
+    if (detail.includes('缓存') || detail.toLowerCase().includes('cache')) return detail
+    return `${detail}\n${cacheHintMessage}`
+  }
+
+  const shouldSuggestCacheClear = (detail: string | null | undefined, status?: number | null) => {
+    if (!['txt', '.txt'].includes(sourceFormatRef.current || '')) return false
+    if (status === 422 || status === 500) return true
+    const msg = detail || ''
+    return (
+      msg.includes('编码') ||
+      msg.includes('乱码') ||
+      msg.includes('非文本') ||
+      msg.includes('空章节')
+    )
+  }
+
   // 加载完整目录
   const loadToc = async (): Promise<boolean> => {
     try {
@@ -957,7 +976,11 @@ export default function ReaderPage() {
       } else {
         const detail = (err as any)?.response?.data?.detail || (err as any)?.message
         setError('加载目录失败')
-        setErrorDetail(detail || '请稍后重试')
+        if (shouldSuggestCacheClear(detail, status)) {
+          setErrorDetail(appendCacheHint(detail || '请稍后重试'))
+        } else {
+          setErrorDetail(detail || '请稍后重试')
+        }
         handleConvertSuggestion(err)
       }
       return false
@@ -1150,7 +1173,11 @@ export default function ReaderPage() {
       }
       
       setError(errorMessage)
-      setErrorDetail(detailMessage)
+      if (shouldSuggestCacheClear(detailMessage, status)) {
+        setErrorDetail(appendCacheHint(detailMessage || '请稍后重试'))
+      } else {
+        setErrorDetail(detailMessage)
+      }
     } finally {
       setLoadingChapter(false)
     }
