@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Box, Typography, Grid, Card, CardContent, Alert, Button, IconButton } from '@mui/material'
-import { MenuBook, LibraryBooks, Favorite, ChevronRight } from '@mui/icons-material'
+import { Box, Typography, Grid, Card, CardContent, Alert, Button, IconButton, Stack, LinearProgress } from '@mui/material'
+import { MenuBook, LibraryBooks, Favorite, ChevronRight, Person, AutoAwesome, Storage } from '@mui/icons-material'
 import api from '../services/api'
 import { DashboardResponse, LibrarySummary, ContinueReadingItem, LibraryLatest } from '../types'
 import BookCard from '../components/BookCard'
@@ -41,10 +41,14 @@ export default function DashboardPage() {
   }
 
   // 统计数据
-  const totalBooks = data?.libraries.reduce((sum, lib) => sum + lib.book_count, 0) || 0
-  const totalLibraries = data?.libraries.length || 0
-  const readingCount = data?.continue_reading.length || 0
-  const favoritesCount = data?.favorites_count || 0
+  const stats = data?.stats
+  const totalBooks = stats?.total_books ?? data?.libraries.reduce((sum, lib) => sum + lib.book_count, 0) ?? 0
+  const totalLibraries = stats?.total_libraries ?? data?.libraries.length ?? 0
+  const readingCount = stats?.continue_reading ?? data?.continue_reading.length ?? 0
+  const favoritesCount = stats?.favorites ?? data?.favorites_count ?? 0
+  const authorsCount = stats?.total_authors ?? 0
+  const newBooksCount = stats?.new_books_7d ?? 0
+  const totalSize = stats?.total_size ?? 0
 
   // 根据封面尺寸计算网格列数
   const getGridColumns = () => {
@@ -58,110 +62,176 @@ export default function DashboardPage() {
     }
   }
 
+  const formatBytes = (bytes: number): string => {
+    if (!bytes) return '0 B'
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
+  }
+
+  const heroReading = data?.continue_reading?.[0]
+  const heroLatest = data?.latest_by_library?.[0]?.books?.[0]
+  const heroItem = heroReading || heroLatest
+  const heroCover = heroItem?.cover_url ? `/api${heroItem.cover_url}` : null
+
+  const latestWall = useMemo(() => {
+    if (!data?.latest_by_library) return []
+    return data.latest_by_library.flatMap((lib) => lib.books).slice(0, 20)
+  }, [data?.latest_by_library])
+
+  const posterWidth = coverSize === 'small' ? 120 : coverSize === 'medium' ? 150 : 180
+
   return (
-    <Box sx={{ p: 3 }}>
+    <Box sx={{ p: { xs: 2, md: 3 }, minHeight: '100vh', position: 'relative', overflow: 'hidden' }}>
+      {/* 背景装饰 */}
+      <Box
+        sx={{
+          position: 'absolute',
+          inset: 0,
+          background:
+            'radial-gradient(60% 60% at 10% 10%, rgba(59, 130, 246, 0.18) 0%, transparent 60%), radial-gradient(50% 50% at 90% 20%, rgba(16, 185, 129, 0.14) 0%, transparent 60%), linear-gradient(180deg, #0C1016 0%, #0E141D 40%, #111827 100%)',
+          zIndex: 0,
+        }}
+      />
+      <Box sx={{ position: 'relative', zIndex: 1 }}>
       {/* 欢迎语 */}
-      <Typography variant="h5" fontWeight="bold" sx={{ mb: 3 }}>
-        👋 你好，{user?.username || '用户'}
-      </Typography>
+        <Typography variant="h5" fontWeight="bold" sx={{ mb: 3 }}>
+          👋 你好，{user?.username || '用户'}
+        </Typography>
 
       {/* 错误提示 */}
-      {error && (
-        <Alert severity="error" sx={{ mb: 3 }}>
-          {error}
-          <Button size="small" onClick={loadDashboard} sx={{ ml: 2 }}>
-            重试
-          </Button>
-        </Alert>
-      )}
+        {error && (
+          <Alert severity="error" sx={{ mb: 3 }}>
+            {error}
+            <Button size="small" onClick={loadDashboard} sx={{ ml: 2 }}>
+              重试
+            </Button>
+          </Alert>
+        )}
+
+        {/* Hero */}
+        <Card
+          sx={{
+            mb: 4,
+            position: 'relative',
+            overflow: 'hidden',
+            borderRadius: 4,
+            border: '1px solid rgba(255,255,255,0.08)',
+            background: 'rgba(17, 24, 39, 0.6)',
+            backdropFilter: 'blur(16px)',
+          }}
+        >
+          {heroCover && (
+            <Box
+              sx={{
+                position: 'absolute',
+                inset: 0,
+                backgroundImage: `url(${heroCover})`,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+                filter: 'blur(28px) saturate(1.15)',
+                transform: 'scale(1.08)',
+                opacity: 0.35,
+              }}
+            />
+          )}
+          <Box sx={{ position: 'relative', p: { xs: 2.5, md: 3 }, display: 'flex', gap: 3, alignItems: 'center', flexWrap: 'wrap' }}>
+            <Box
+              sx={{
+                width: { xs: 110, sm: 140, md: 170 },
+                aspectRatio: '2/3',
+                borderRadius: 2,
+                overflow: 'hidden',
+                bgcolor: 'rgba(255,255,255,0.06)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                flexShrink: 0,
+              }}
+            >
+              {heroCover ? (
+                <Box component="img" src={heroCover} alt={heroItem?.title} sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : (
+                <Box sx={{ width: '100%', height: '100%', display: 'grid', placeItems: 'center', color: 'text.secondary' }}>
+                  <MenuBook sx={{ fontSize: 48 }} />
+                </Box>
+              )}
+            </Box>
+
+            <Box sx={{ flex: 1, minWidth: 240 }}>
+              <Typography variant="overline" color="text.secondary">
+                {heroReading ? '继续阅读' : '最新加入'}
+              </Typography>
+              <Typography variant="h4" fontWeight={700} sx={{ mt: 0.5, mb: 1 }}>
+                {heroItem?.title || '欢迎回来'}
+              </Typography>
+              {heroItem?.author_name && (
+                <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
+                  {heroItem.author_name}
+                </Typography>
+              )}
+
+              {heroReading && (
+                <Box sx={{ maxWidth: 360, mb: 2 }}>
+                  <Typography variant="caption" color="text.secondary">
+                    阅读进度 {(heroReading.progress * 100).toFixed(0)}%
+                  </Typography>
+                  <LinearProgress variant="determinate" value={heroReading.progress * 100} sx={{ mt: 0.5 }} />
+                </Box>
+              )}
+
+              <Stack direction="row" spacing={1.5} sx={{ flexWrap: 'wrap' }}>
+                <Button
+                  variant="contained"
+                  onClick={() => heroItem && navigate(`/book/${heroItem.id}`)}
+                >
+                  {heroReading ? '继续阅读' : '查看详情'}
+                </Button>
+                <Button variant="outlined" onClick={() => navigate('/search')}>
+                  去找书
+                </Button>
+              </Stack>
+            </Box>
+          </Box>
+        </Card>
 
       {/* 统计卡片 - 移动端优化 */}
-      <Grid container spacing={1.5} sx={{ mb: 4 }}>
-        <Grid item xs={6} md={3}>
-          <Card sx={{ bgcolor: 'primary.main', color: 'white' }}>
-            <CardContent sx={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: { xs: 1, sm: 2 },
-              p: { xs: 1.5, sm: 2 },
-              '&:last-child': { pb: { xs: 1.5, sm: 2 } }
-            }}>
-              <MenuBook sx={{ fontSize: { xs: 28, sm: 40 } }} />
-              <Box sx={{ minWidth: 0 }}>
-                <Typography variant="h5" fontWeight="bold" sx={{ fontSize: { xs: '1.25rem', sm: '1.5rem' } }}>
-                  {loading ? '-' : totalBooks}
-                </Typography>
-                <Typography variant="caption" sx={{ opacity: 0.9, fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
-                  书籍总数
-                </Typography>
-              </Box>
-            </CardContent>
-          </Card>
+        <Grid container spacing={1.5} sx={{ mb: 4 }}>
+          {[
+            { label: '书籍总数', value: loading ? '-' : totalBooks, icon: MenuBook, tone: 'linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%)' },
+            { label: '书库数量', value: loading ? '-' : totalLibraries, icon: LibraryBooks, tone: 'linear-gradient(135deg, #10B981 0%, #059669 100%)' },
+            { label: '作者数量', value: loading ? '-' : authorsCount, icon: Person, tone: 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)' },
+            { label: '近7天新增', value: loading ? '-' : newBooksCount, icon: AutoAwesome, tone: 'linear-gradient(135deg, #EC4899 0%, #DB2777 100%)' },
+            { label: '正在阅读', value: loading ? '-' : readingCount, icon: MenuBook, tone: 'linear-gradient(135deg, #6366F1 0%, #4F46E5 100%)' },
+            { label: '总容量', value: loading ? '-' : formatBytes(totalSize), icon: Storage, tone: 'linear-gradient(135deg, #0EA5E9 0%, #0284C7 100%)' },
+            { label: '收藏数', value: loading ? '-' : favoritesCount, icon: Favorite, tone: 'linear-gradient(135deg, #EF4444 0%, #DC2626 100%)' },
+          ].map((item, idx) => {
+            const Icon = item.icon
+            return (
+              <Grid item xs={6} md={3} lg={2.4} key={`${item.label}-${idx}`}>
+                <Card
+                  sx={{
+                    color: 'white',
+                    background: item.tone,
+                    borderRadius: 3,
+                    boxShadow: '0 10px 30px rgba(0,0,0,0.25)',
+                  }}
+                >
+                  <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                    <Icon sx={{ fontSize: { xs: 26, sm: 34 } }} />
+                    <Box sx={{ minWidth: 0 }}>
+                      <Typography variant="h6" fontWeight={700} sx={{ lineHeight: 1.1 }}>
+                        {item.value}
+                      </Typography>
+                      <Typography variant="caption" sx={{ opacity: 0.9 }}>
+                        {item.label}
+                      </Typography>
+                    </Box>
+                  </CardContent>
+                </Card>
+              </Grid>
+            )
+          })}
         </Grid>
-        <Grid item xs={6} md={3}>
-          <Card sx={{ bgcolor: 'secondary.main', color: 'white' }}>
-            <CardContent sx={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: { xs: 1, sm: 2 },
-              p: { xs: 1.5, sm: 2 },
-              '&:last-child': { pb: { xs: 1.5, sm: 2 } }
-            }}>
-              <LibraryBooks sx={{ fontSize: { xs: 28, sm: 40 } }} />
-              <Box sx={{ minWidth: 0 }}>
-                <Typography variant="h5" fontWeight="bold" sx={{ fontSize: { xs: '1.25rem', sm: '1.5rem' } }}>
-                  {loading ? '-' : totalLibraries}
-                </Typography>
-                <Typography variant="caption" sx={{ opacity: 0.9, fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
-                  书库数
-                </Typography>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={6} md={3}>
-          <Card sx={{ bgcolor: 'success.main', color: 'white' }}>
-            <CardContent sx={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: { xs: 1, sm: 2 },
-              p: { xs: 1.5, sm: 2 },
-              '&:last-child': { pb: { xs: 1.5, sm: 2 } }
-            }}>
-              <MenuBook sx={{ fontSize: { xs: 28, sm: 40 } }} />
-              <Box sx={{ minWidth: 0 }}>
-                <Typography variant="h5" fontWeight="bold" sx={{ fontSize: { xs: '1.25rem', sm: '1.5rem' } }}>
-                  {loading ? '-' : readingCount}
-                </Typography>
-                <Typography variant="caption" sx={{ opacity: 0.9, fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
-                  正在阅读
-                </Typography>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={6} md={3}>
-          <Card sx={{ bgcolor: 'error.main', color: 'white' }}>
-            <CardContent sx={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: { xs: 1, sm: 2 },
-              p: { xs: 1.5, sm: 2 },
-              '&:last-child': { pb: { xs: 1.5, sm: 2 } }
-            }}>
-              <Favorite sx={{ fontSize: { xs: 28, sm: 40 } }} />
-              <Box sx={{ minWidth: 0 }}>
-                <Typography variant="h5" fontWeight="bold" sx={{ fontSize: { xs: '1.25rem', sm: '1.5rem' } }}>
-                  {loading ? '-' : favoritesCount}
-                </Typography>
-                <Typography variant="caption" sx={{ opacity: 0.9, fontSize: { xs: '0.65rem', sm: '0.75rem' } }}>
-                  收藏数
-                </Typography>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
 
       {/* 继续阅读 */}
       {(loading || (data?.continue_reading && data.continue_reading.length > 0)) && (
@@ -195,6 +265,42 @@ export default function DashboardPage() {
                 </Box>
               ))
             )}
+          </Box>
+        </Box>
+      )}
+
+      {/* 海报墙 - 最新入库 */}
+      {(loading || latestWall.length > 0) && (
+        <Box sx={{ mb: 4 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+            <Typography variant="h6">最新入库</Typography>
+            <IconButton size="small" onClick={() => navigate('/library')} sx={{ ml: 1 }}>
+              <ChevronRight />
+            </IconButton>
+          </Box>
+          <Box
+            sx={{
+              display: 'flex',
+              gap: 2,
+              overflowX: 'auto',
+              pb: 2,
+              mx: -2,
+              px: 2,
+              '::-webkit-scrollbar': { display: 'none' },
+              scrollbarWidth: 'none',
+            }}
+          >
+            {loading
+              ? Array.from({ length: 10 }).map((_, i) => (
+                  <Box key={i} sx={{ width: posterWidth, flexShrink: 0 }}>
+                    <BookCard loading />
+                  </Box>
+                ))
+              : latestWall.map((book) => (
+                  <Box key={`${book.id}-${book.title}`} sx={{ width: posterWidth, flexShrink: 0 }}>
+                    <BookCard book={book} />
+                  </Box>
+                ))}
           </Box>
         </Box>
       )}
@@ -250,19 +356,30 @@ export default function DashboardPage() {
               <ChevronRight />
             </IconButton>
           </Box>
-          <Grid container spacing={2}>
+          <Box
+            sx={{
+              display: 'flex',
+              gap: 2,
+              overflowX: 'auto',
+              pb: 2,
+              mx: -2,
+              px: 2,
+              '::-webkit-scrollbar': { display: 'none' },
+              scrollbarWidth: 'none',
+            }}
+          >
             {loading
-              ? [1, 2, 3, 4, 5, 6].map((i) => (
-                  <Grid item {...getGridColumns()} key={i}>
+              ? [1, 2, 3, 4, 5].map((i) => (
+                  <Box key={i} sx={{ width: posterWidth, flexShrink: 0 }}>
                     <BookCard loading />
-                  </Grid>
+                  </Box>
                 ))
-              : libraryLatest.books.slice(0, 6).map((book) => (
-                  <Grid item {...getGridColumns()} key={book.id}>
+              : libraryLatest.books.map((book) => (
+                  <Box key={book.id} sx={{ width: posterWidth, flexShrink: 0 }}>
                     <BookCard book={book} />
-                  </Grid>
+                  </Box>
                 ))}
-          </Grid>
+          </Box>
         </Box>
       ))}
 
@@ -278,6 +395,7 @@ export default function DashboardPage() {
           </Typography>
         </Box>
       )}
+      </Box>
     </Box>
   )
 }

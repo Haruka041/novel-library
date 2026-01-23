@@ -65,11 +65,23 @@ class LibraryLatest(BaseModel):
     books: List[BookSummary]
 
 
+class DashboardStats(BaseModel):
+    total_books: int = 0
+    total_libraries: int = 0
+    total_authors: int = 0
+    total_groups: int = 0
+    continue_reading: int = 0
+    favorites: int = 0
+    new_books_7d: int = 0
+    total_size: int = 0
+
+
 class DashboardResponse(BaseModel):
     continue_reading: List[ContinueReadingItem]
     libraries: List[LibrarySummary]
     latest_by_library: List[LibraryLatest]
     favorites_count: int = 0
+    stats: DashboardStats = DashboardStats()
 
 
 # ============= 辅助函数 =============
@@ -194,6 +206,25 @@ async def get_dashboard(
     # 1. 获取用户可访问的书库
     accessible_libraries = await get_user_accessible_libraries(db, current_user)
     library_ids = [lib.id for lib in accessible_libraries]
+
+    # 0. 如果没有可访问书库，直接返回空数据
+    if not library_ids:
+        return DashboardResponse(
+            continue_reading=[],
+            libraries=[],
+            latest_by_library=[],
+            favorites_count=0,
+            stats=DashboardStats(
+                total_books=0,
+                total_libraries=0,
+                total_authors=0,
+                total_groups=0,
+                continue_reading=0,
+                favorites=0,
+                new_books_7d=0,
+                total_size=0,
+            )
+        )
     
     # 2. 构建书库摘要列表（包含书籍数量）
     libraries_summary = []
@@ -277,12 +308,66 @@ async def get_dashboard(
         select(func.count(Favorite.id)).where(Favorite.user_id == current_user.id)
     )
     favorites_count = result.scalar() or 0
+
+    # 6. 统计信息（仅统计可访问书库）
+    total_books_result = await db.execute(
+        select(func.count(Book.id)).where(Book.library_id.in_(library_ids))
+    )
+    total_books = total_books_result.scalar() or 0
+
+    total_authors_result = await db.execute(
+        select(func.count(func.distinct(Book.author_id)))
+        .where(Book.library_id.in_(library_ids), Book.author_id.isnot(None))
+    )
+    total_authors = total_authors_result.scalar() or 0
+
+    total_groups_result = await db.execute(
+        select(func.count(func.distinct(Book.group_id)))
+        .where(Book.library_id.in_(library_ids), Book.group_id.isnot(None))
+    )
+    total_groups = total_groups_result.scalar() or 0
+
+    recent_threshold = datetime.utcnow() - timedelta(days=7)
+    new_books_result = await db.execute(
+        select(func.count(Book.id))
+        .where(Book.library_id.in_(library_ids), Book.added_at >= recent_threshold)
+    )
+    new_books_7d = new_books_result.scalar() or 0
+
+    total_size_result = await db.execute(
+        select(func.coalesce(func.sum(BookVersion.file_size), 0))
+        .join(Book, BookVersion.book_id == Book.id)
+        .where(Book.library_id.in_(library_ids), BookVersion.is_primary == True)
+    )
+    total_size = total_size_result.scalar() or 0
+
+    continue_reading_count_result = await db.execute(
+        select(func.count(ReadingProgress.id))
+        .join(Book, ReadingProgress.book_id == Book.id)
+        .where(
+            ReadingProgress.user_id == current_user.id,
+            ReadingProgress.finished == False,
+            ReadingProgress.progress > 0,
+            Book.library_id.in_(library_ids)
+        )
+    )
+    continue_reading_count = continue_reading_count_result.scalar() or 0
     
     return DashboardResponse(
         continue_reading=continue_reading,
         libraries=libraries_summary,
         latest_by_library=latest_by_library,
-        favorites_count=favorites_count
+        favorites_count=favorites_count,
+        stats=DashboardStats(
+            total_books=total_books,
+            total_libraries=len(accessible_libraries),
+            total_authors=total_authors,
+            total_groups=total_groups,
+            continue_reading=continue_reading_count,
+            favorites=favorites_count,
+            new_books_7d=new_books_7d,
+            total_size=total_size,
+        )
     )
 
 

@@ -43,12 +43,24 @@ export interface LibraryLatest {
   books: BookSummary[]
 }
 
+export interface DashboardStats {
+  total_books: number
+  total_libraries: number
+  total_authors: number
+  total_groups: number
+  continue_reading: number
+  favorites: number
+  new_books_7d: number
+  total_size: number
+}
+
 // Dashboard 响应
 export interface DashboardResponse {
   continue_reading: ContinueReadingItem[]
   libraries: LibrarySummary[]
   latest_by_library: LibraryLatest[]
   favorites_count: number
+  stats?: DashboardStats
 }
 
 // 书籍详情

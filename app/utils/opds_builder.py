@@ -3,17 +3,34 @@ OPDS Feed 生成器
 用于构建符合 OPDS 1.2 规范的 Atom Feed
 """
 from datetime import datetime
+import re
 from typing import List, Optional
 from urllib.parse import quote
 
 from app.models import Author, Book, BookVersion
+from app.utils.logger import log
+
+
+_INVALID_XML_CHARS = re.compile(
+    r"[\x00-\x08\x0B\x0C\x0E-\x1F\uD800-\uDFFF\uFFFE\uFFFF]"
+)
+
+
+def _sanitize_xml_text(value: str) -> str:
+    """清理 XML 1.0 不允许的字符，避免 OPDS 输出导致编码异常。"""
+    if not value:
+        return ""
+    return _INVALID_XML_CHARS.sub("", value)
 
 
 def escape_xml(text: str) -> str:
-    """转义 XML 特殊字符"""
+    """转义 XML 特殊字符，并清理非法字符。"""
     if not text:
         return ""
-    return (text
+    if isinstance(text, bytes):
+        text = text.decode("utf-8", errors="replace")
+    safe_text = _sanitize_xml_text(str(text))
+    return (safe_text
             .replace("&", "&amp;")
             .replace("<", "&lt;")
             .replace(">", "&gt;")
@@ -235,7 +252,10 @@ def build_opds_acquisition_feed(
     # 添加书籍条目
     if books:
         for book in books:
-            xml += build_opds_entry(book, base_url)
+            try:
+                xml += build_opds_entry(book, base_url)
+            except Exception as exc:
+                log.warning(f"OPDS 构建条目失败: book_id={getattr(book, 'id', None)} err={exc}")
     else:
         xml += '''  <entry>
     <title>暂无书籍</title>
