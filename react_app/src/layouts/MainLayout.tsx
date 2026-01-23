@@ -62,7 +62,7 @@ const MainLayout = () => {
       </AppBar>
 
       {/* Main Content */}
-      <Box component="main" sx={{ flexGrow: 1, pt: 8, pb: isMobile ? 7 : 2 }}>
+      <Box component="main" sx={{ flexGrow: 1, pt: 8, pb: isMobile ? 9 : 2 }}>
         <Outlet />
       </Box>
 
@@ -91,6 +91,7 @@ const MainLayout = () => {
             bgcolor: 'background.paper',
             borderTop: 1,
             borderColor: 'divider',
+            zIndex: theme.zIndex.appBar + 1,
           }}
         >
           <BottomNavigationAction label="首页" icon={<Home />} />

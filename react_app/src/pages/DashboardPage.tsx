@@ -107,6 +107,7 @@ export default function DashboardPage() {
           inset: 0,
           background: 'linear-gradient(180deg, #0C1016 0%, #0F1621 45%, #111827 100%)',
           zIndex: 0,
+          pointerEvents: 'none',
         }}
       />
       <Box sx={{ position: 'relative', zIndex: 1 }}>
