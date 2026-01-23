@@ -1,6 +1,9 @@
 import { Box, Card, CardContent, Typography, LinearProgress, Skeleton } from '@mui/material'
 import { useNavigate } from 'react-router-dom'
+import { useMemo, useState } from 'react'
 import { ContinueReadingItem } from '../types'
+import { usePrimaryColor } from '../stores/themeStore'
+import { generateMorandiPalette } from '../utils/colorUtils'
 
 interface ContinueReadingCardProps {
   item?: ContinueReadingItem
@@ -9,6 +12,9 @@ interface ContinueReadingCardProps {
 
 export default function ContinueReadingCard({ item, loading = false }: ContinueReadingCardProps) {
   const navigate = useNavigate()
+  const [imageError, setImageError] = useState(false)
+  const primaryColor = usePrimaryColor()
+  const morandiPalette = useMemo(() => generateMorandiPalette(primaryColor), [primaryColor])
 
   if (loading) {
     return (
@@ -26,6 +32,19 @@ export default function ContinueReadingCard({ item, loading = false }: ContinueR
   if (!item) return null
 
   const progressPercent = Math.round(item.progress * 100)
+  const showFallback = !item.cover_url || imageError
+
+  const getColorIndex = (title: string): number => {
+    let hash = 0
+    const titleStr = String(title || '')
+    for (let i = 0; i < titleStr.length; i++) {
+      hash = ((hash << 5) - hash) + titleStr.charCodeAt(i)
+      hash = hash & hash
+    }
+    return Math.abs(hash) % 6
+  }
+
+  const coverColor = morandiPalette[getColorIndex(item.title)]
 
   return (
     <Card
@@ -47,11 +66,43 @@ export default function ContinueReadingCard({ item, loading = false }: ContinueR
           width: 80,
           height: 120,
           flexShrink: 0,
-          bgcolor: 'grey.800',
           overflow: 'hidden',
         }}
       >
-        {item.cover_url ? (
+        {showFallback ? (
+          <Box
+            sx={{
+              width: '100%',
+              height: '100%',
+              bgcolor: coverColor,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              p: 1,
+            }}
+          >
+            <Typography variant="h5" sx={{ color: 'rgba(255,255,255,0.9)', mb: 0.5 }}>
+              📖
+            </Typography>
+            <Typography
+              variant="caption"
+              sx={{
+                color: 'rgba(255,255,255,0.95)',
+                textAlign: 'center',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                display: '-webkit-box',
+                WebkitLineClamp: 3,
+                WebkitBoxOrient: 'vertical',
+                lineHeight: 1.2,
+                px: 0.5,
+              }}
+            >
+              {item.title}
+            </Typography>
+          </Box>
+        ) : (
           <Box
             component="img"
             src={`/api${item.cover_url}`}
@@ -63,24 +114,9 @@ export default function ContinueReadingCard({ item, loading = false }: ContinueR
               objectFit: 'cover',
             }}
             onError={(e: React.SyntheticEvent<HTMLImageElement>) => {
-              e.currentTarget.style.display = 'none'
+              setImageError(true)
             }}
           />
-        ) : (
-          <Box
-            sx={{
-              width: '100%',
-              height: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              bgcolor: 'grey.700',
-            }}
-          >
-            <Typography variant="h5" color="grey.500">
-              📖
-            </Typography>
-          </Box>
         )}
       </Box>
 

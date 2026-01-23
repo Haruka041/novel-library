@@ -9,6 +9,8 @@ import ContinueReadingCard from '../components/ContinueReadingCard'
 import { useAuthStore } from '../stores/authStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
+import { usePrimaryColor } from '../stores/themeStore'
+import { generateMorandiPalette } from '../utils/colorUtils'
 
 export default function DashboardPage() {
   // 设置页面标题
@@ -17,6 +19,8 @@ export default function DashboardPage() {
   const navigate = useNavigate()
   const user = useAuthStore((state) => state.user)
   const { coverSize } = useSettingsStore()
+  const primaryColor = usePrimaryColor()
+  const morandiPalette = useMemo(() => generateMorandiPalette(primaryColor), [primaryColor])
   
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -75,6 +79,18 @@ export default function DashboardPage() {
   const heroItem = heroReading || heroLatest
   const heroCover = heroItem?.cover_url ? `/api${heroItem.cover_url}` : null
 
+  const getColorIndex = (title: string): number => {
+    let hash = 0
+    const titleStr = String(title || '')
+    for (let i = 0; i < titleStr.length; i++) {
+      hash = ((hash << 5) - hash) + titleStr.charCodeAt(i)
+      hash = hash & hash
+    }
+    return Math.abs(hash) % 6
+  }
+
+  const heroCoverColor = morandiPalette[getColorIndex(heroItem?.title || '')]
+
   const latestWall = useMemo(() => {
     if (!data?.latest_by_library) return []
     return data.latest_by_library.flatMap((lib) => lib.books).slice(0, 20)
@@ -89,8 +105,7 @@ export default function DashboardPage() {
         sx={{
           position: 'absolute',
           inset: 0,
-          background:
-            'radial-gradient(60% 60% at 10% 10%, rgba(59, 130, 246, 0.18) 0%, transparent 60%), radial-gradient(50% 50% at 90% 20%, rgba(16, 185, 129, 0.14) 0%, transparent 60%), linear-gradient(180deg, #0C1016 0%, #0E141D 40%, #111827 100%)',
+          background: 'linear-gradient(180deg, #0C1016 0%, #0F1621 45%, #111827 100%)',
           zIndex: 0,
         }}
       />
@@ -118,8 +133,8 @@ export default function DashboardPage() {
             overflow: 'hidden',
             borderRadius: 4,
             border: '1px solid rgba(255,255,255,0.08)',
-            background: 'rgba(17, 24, 39, 0.6)',
-            backdropFilter: 'blur(16px)',
+            background: 'rgba(17, 24, 39, 0.72)',
+            backdropFilter: 'blur(10px)',
           }}
         >
           {heroCover && (
@@ -130,9 +145,9 @@ export default function DashboardPage() {
                 backgroundImage: `url(${heroCover})`,
                 backgroundSize: 'cover',
                 backgroundPosition: 'center',
-                filter: 'blur(28px) saturate(1.15)',
+                filter: 'blur(18px) saturate(1.05)',
                 transform: 'scale(1.08)',
-                opacity: 0.35,
+                opacity: 0.22,
               }}
             />
           )}
@@ -151,8 +166,35 @@ export default function DashboardPage() {
               {heroCover ? (
                 <Box component="img" src={heroCover} alt={heroItem?.title} sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />
               ) : (
-                <Box sx={{ width: '100%', height: '100%', display: 'grid', placeItems: 'center', color: 'text.secondary' }}>
-                  <MenuBook sx={{ fontSize: 48 }} />
+                <Box
+                  sx={{
+                    width: '100%',
+                    height: '100%',
+                    bgcolor: heroCoverColor,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    p: 1.5,
+                  }}
+                >
+                  <MenuBook sx={{ fontSize: 44, color: 'rgba(255,255,255,0.9)', mb: 1 }} />
+                  <Typography
+                    sx={{
+                      fontSize: '0.85rem',
+                      fontWeight: 600,
+                      color: 'rgba(255,255,255,0.95)',
+                      textAlign: 'center',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      display: '-webkit-box',
+                      WebkitLineClamp: 3,
+                      WebkitBoxOrient: 'vertical',
+                      lineHeight: 1.3,
+                    }}
+                  >
+                    {heroItem?.title || '暂无封面'}
+                  </Typography>
                 </Box>
               )}
             </Box>
