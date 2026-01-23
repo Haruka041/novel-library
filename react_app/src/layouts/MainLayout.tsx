@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
-import { Box, AppBar, Toolbar, Typography, IconButton, Avatar, BottomNavigation, BottomNavigationAction, useMediaQuery, useTheme } from '@mui/material'
+import { Box, AppBar, Toolbar, Typography, IconButton, Avatar, BottomNavigation, BottomNavigationAction, Link, useMediaQuery, useTheme } from '@mui/material'
 import { Home, LibraryBooks, Person, Search } from '@mui/icons-material'
 import { useAuthStore } from '../stores/authStore'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -64,6 +64,38 @@ const MainLayout = () => {
       {/* Main Content */}
       <Box component="main" sx={{ flexGrow: 1, pt: 8, pb: isMobile ? 9 : 2 }}>
         <Outlet />
+        <Box
+          component="footer"
+          sx={{
+            mt: 4,
+            py: 2,
+            textAlign: 'center',
+            color: 'text.secondary',
+            borderTop: 1,
+            borderColor: 'divider',
+          }}
+        >
+          设计与开发由{' '}
+          <Link
+            href="https://github.com/sooklib"
+            target="_blank"
+            rel="noreferrer"
+            color="primary"
+            underline="hover"
+          >
+            Sooklib
+          </Link>
+          {' '} &amp; {' '}
+          <Link
+            href="https://github.com/Haruka041"
+            target="_blank"
+            rel="noreferrer"
+            color="primary"
+            underline="hover"
+          >
+            Haruka041
+          </Link>
+        </Box>
       </Box>
 
       {/* Bottom Navigation (Mobile) */}
