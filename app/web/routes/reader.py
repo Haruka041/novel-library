@@ -380,19 +380,22 @@ def _detect_txt_encoding(file_path: Path) -> Optional[str]:
         'big5',
         'utf-16-le', 'utf-16-be',
     ]
-    metrics = []
+    metrics: list[tuple[str, float, float, float, float]] = []
     for encoding in candidates:
         try:
-            quality, cjk_ratio, ascii_ratio = _sample_text_metrics(raw_data, encoding)
+            quality, cjk_ratio, ascii_ratio, common_ratio = _sample_text_metrics(raw_data, encoding)
         except Exception:
             continue
         readable_ratio = cjk_ratio + ascii_ratio
-        metrics.append((encoding, quality, readable_ratio))
+        metrics.append((encoding, quality, readable_ratio, common_ratio, ascii_ratio))
 
     if metrics:
-        preferred = [m for m in metrics if m[2] >= 0.05]
+        preferred = [
+            m for m in metrics
+            if (m[3] >= 0.01 or m[4] >= 0.12 or m[2] >= 0.05)
+        ]
         pool = preferred or metrics
-        pool.sort(key=lambda m: (m[1], -m[2]))
+        pool.sort(key=lambda m: (-m[3], -m[2], m[1]))
         return pool[0][0]
 
     detected = chardet.detect(raw_data).get('encoding')
@@ -413,20 +416,25 @@ def _detect_txt_encoding(file_path: Path) -> Optional[str]:
     if detected_lower in ('utf-16be', 'utf_16be'):
         return "utf-16-be"
 
-    return detected
+    if _is_text_sample_valid(file_path, detected):
+        return detected
+    return None
 
 
-def _sample_text_metrics(raw_data: bytes, encoding: str) -> tuple[float, float, float]:
+_COMMON_CJK_SET = set("的一是在不了有和人这中大为上个国我以要他时来用们生到作地于出就分对成会可主发年动同工也能下过子说产种面而方后多定行学法所民得经十三之进着等部度家电力里如水化高自二理起小物现实加量都两体制机当使点从业本去把性好应开它合还因由其些然前外天政四日那社义事平形相全表间样与关各重新线内数正心反你明看原又么利比或但质气第向道命此变条只没结解问意建月公无系军很情者最立代想已通并提直题党程展五果料象员革位入常文总次品式活设及管特件长求老头基资边流路级少图山统接知较将组见计别她手角期根论运农指几九区强放决西被干做必战先回则任取据处队南给色光门即保治北造百规热领七海口东导器压志世金增争济阶油思术极交受联什认六共权收证改清己美再采转更单风切打白教速花带安场身车例真至达走积示议声报斗完类八离华名确才科张信马节话米整空元况今集温传土许步群广石记需段研界拉林律叫且究观越织装影算低持音众书布复容儿须际商非验连断深难近矿千周委素技备半办青省列习便响约支般史感劳便团往酸历市克何除消构支般爱配胜降阶术")
+
+def _sample_text_metrics(raw_data: bytes, encoding: str) -> tuple[float, float, float, float]:
     decoded = raw_data.decode(encoding, errors='replace')
     if not decoded:
-        return 1.0, 0.0, 0.0
+        return 1.0, 0.0, 0.0, 0.0
     total = len(decoded)
     replacement = decoded.count('\ufffd')
     control = sum(1 for ch in decoded if ord(ch) < 32 and ch not in '\t\n\r')
     quality = (replacement + control) / total
     cjk = sum(1 for ch in decoded if '\u4e00' <= ch <= '\u9fff') / total
     ascii_letters = sum(1 for ch in decoded if ch.isascii() and ch.isalpha()) / total
-    return quality, cjk, ascii_letters
+    common_cjk = sum(1 for ch in decoded if ch in _COMMON_CJK_SET) / total
+    return quality, cjk, ascii_letters, common_cjk
 
 
 def _is_text_sample_valid(file_path: Path, encoding: str) -> bool:
@@ -435,9 +443,13 @@ def _is_text_sample_valid(file_path: Path, encoding: str) -> bool:
             raw_data = f.read(200000)
     except Exception:
         return False
-    quality, cjk_ratio, ascii_ratio = _sample_text_metrics(raw_data, encoding)
+    quality, cjk_ratio, ascii_ratio, common_ratio = _sample_text_metrics(raw_data, encoding)
     readable_ratio = cjk_ratio + ascii_ratio
-    return (quality <= 0.25 and readable_ratio >= 0.03) or readable_ratio >= 0.15
+    return (
+        (quality <= 0.25 and readable_ratio >= 0.03 and common_ratio >= 0.01)
+        or readable_ratio >= 0.2
+        or ascii_ratio >= 0.2
+    )
 
 
 async def _read_txt_file_with_encoding(file_path: Path) -> tuple[Optional[str], Optional[str]]:
