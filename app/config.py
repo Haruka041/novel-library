@@ -67,6 +67,8 @@ class LoggingConfig(BaseModel):
     max_size: int = 10485760  # 10MB
     backup_count: int = 5
     file: str = "/app/data/logs/app.log"
+    scan_detail: bool = True
+    scan_detail_every: int = 1
 
 
 class OPDSConfig(BaseModel):
@@ -169,6 +171,10 @@ class Config(BaseModel):
             config_data.setdefault("security", {})["secret_key"] = secret_key
         if log_level := os.getenv("LOG_LEVEL"):
             config_data.setdefault("logging", {})["level"] = log_level
+        if log_scan_detail := os.getenv("LOG_SCAN_DETAIL"):
+            config_data.setdefault("logging", {})["scan_detail"] = log_scan_detail.strip().lower() in ("1", "true", "yes", "on")
+        if log_scan_detail_every := os.getenv("LOG_SCAN_DETAIL_EVERY"):
+            config_data.setdefault("logging", {})["scan_detail_every"] = int(log_scan_detail_every)
         if scan_interval := os.getenv("SCAN_INTERVAL"):
             config_data.setdefault("scanner", {})["interval"] = int(scan_interval)
         if app_name := os.getenv("APP_NAME"):

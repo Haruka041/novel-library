@@ -38,6 +38,7 @@ class BackgroundScanner:
         
         # 扫描过程中的错误日志（格式: [{"file": ..., "error": ...}, ...]）
         self._error_logs: List[dict] = []
+        self._detail_counter = 0
         
         # 创建异步引擎（用于后台任务）
         self.engine = create_async_engine(
@@ -110,6 +111,7 @@ class BackgroundScanner:
         
         # 重置错误日志
         self._error_logs = []
+        self._detail_counter = 0
         
         async with self.get_session() as db:
             try:
@@ -301,8 +303,10 @@ class BackgroundScanner:
         
         for file_path in files:
             try:
+                self._detail_counter += 1
+                log_detail = self._should_log_detail()
                 # 处理单个文件
-                await self._process_single_file(file_path, library_id, task, db, deduplicator)
+                await self._process_single_file(file_path, library_id, task, db, deduplicator, log_detail)
                 task.processed_files += 1
                 
             except Exception as e:
@@ -327,7 +331,8 @@ class BackgroundScanner:
         library_id: int, 
         task: ScanTask, 
         db: AsyncSession,
-        deduplicator: Deduplicator
+        deduplicator: Deduplicator,
+        log_detail: bool
     ):
         """
         处理单个文件
@@ -344,6 +349,8 @@ class BackgroundScanner:
         
         if not metadata:
             task.skipped_books += 1
+            if log_detail:
+                log.info(f"扫描跳过: {file_path} | 无法提取元数据")
             return
         
         # 去重检测
@@ -355,13 +362,19 @@ class BackgroundScanner:
         
         if action == 'skip':
             task.skipped_books += 1
+            if log_detail:
+                log.info(f"扫描跳过: {file_path} | {reason}")
             return
         elif action == 'add_version':
             await self._save_book_version(file_path, book_id, metadata, db)
             task.added_books += 1
+            if log_detail:
+                log.info(f"新增版本: {file_path} | {reason}")
         else:  # new_book
             await self._save_book(file_path, library_id, metadata, db)
             task.added_books += 1
+            if log_detail:
+                log.info(f"新增书籍: {metadata['title']} | {metadata.get('author', 'Unknown')} | {file_path}")
     
     def _extract_metadata(self, file_path: Path) -> Optional[dict]:
         """提取元数据"""
@@ -379,6 +392,12 @@ class BackgroundScanner:
         except Exception as e:
             log.error(f"元数据提取失败: {file_path}, 错误: {e}")
             return None
+
+    def _should_log_detail(self) -> bool:
+        if not settings.logging.scan_detail:
+            return False
+        every = max(settings.logging.scan_detail_every, 1)
+        return self._detail_counter % every == 0
     
     async def _save_book(self, file_path: Path, library_id: int, metadata: dict, db: AsyncSession):
         """保存新书籍"""
