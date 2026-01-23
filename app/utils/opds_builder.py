@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import List, Optional
 from urllib.parse import quote
 
-from app.models import Author, Book
+from app.models import Author, Book, BookVersion
 
 
 def escape_xml(text: str) -> str:
@@ -24,6 +24,16 @@ def escape_xml(text: str) -> str:
 def format_datetime(dt: datetime) -> str:
     """格式化日期时间为 ISO 8601 格式"""
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def get_primary_version(book: Book) -> Optional[BookVersion]:
+    """获取书籍主版本，兜底选择最新版本"""
+    if not book.versions:
+        return None
+    primary = next((v for v in book.versions if v.is_primary), None)
+    if primary:
+        return primary
+    return max(book.versions, key=lambda v: v.added_at or datetime.min)
 
 
 def build_opds_root(base_url: str) -> str:
@@ -45,7 +55,7 @@ def build_opds_root(base_url: str) -> str:
   <id>{base_url}/opds</id>
   <title>小说书库</title>
   <updated>{now}</updated>
-  <icon>{base_url}/static/images/icon.png</icon>
+  <icon>{base_url}/icons/icon-144x144.png</icon>
   
   <link rel="self" href="{base_url}/opds" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
   <link rel="start" href="{base_url}/opds" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
@@ -57,6 +67,14 @@ def build_opds_root(base_url: str) -> str:
     <updated>{now}</updated>
     <link rel="subsection" href="{base_url}/opds/recent" type="application/atom+xml;profile=opds-catalog;kind=acquisition"/>
     <content type="text">浏览最新添加的书籍</content>
+  </entry>
+
+  <entry>
+    <title>书库</title>
+    <id>{base_url}/opds/libraries</id>
+    <updated>{now}</updated>
+    <link rel="subsection" href="{base_url}/opds/libraries" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
+    <content type="text">按书库浏览书籍</content>
   </entry>
   
   <entry>
@@ -96,21 +114,33 @@ def build_opds_entry(book: Book, base_url: str, author_name: Optional[str] = Non
     description = escape_xml(book.description or "暂无简介")
     updated = format_datetime(book.added_at)
     
+    primary_version = get_primary_version(book)
+    file_format = (primary_version.file_format if primary_version else "unknown").lower()
+    file_size = primary_version.file_size if primary_version else 0
+
     # 确定 MIME 类型
     mime_types = {
         'epub': 'application/epub+zip',
         'mobi': 'application/x-mobipocket-ebook',
+        'azw': 'application/vnd.amazon.ebook',
+        'azw3': 'application/vnd.amazon.ebook',
+        'pdf': 'application/pdf',
         'txt': 'text/plain',
+        'cbz': 'application/vnd.comicbook+zip',
+        'cbr': 'application/vnd.comicbook-rar',
     }
-    mime_type = mime_types.get(book.file_format.lower(), 'application/octet-stream')
+    mime_type = mime_types.get(file_format, 'application/octet-stream')
     
     # 构建下载链接
     download_link = f"{base_url}/opds/download/{book.id}"
-    cover_link = f"{base_url}/api/reader/cover/{book.id}"
+    cover_link = f"{base_url}/api/books/{book.id}/cover"
     
     # 格式化文件大小
-    size_mb = book.file_size / (1024 * 1024)
-    size_str = f"{size_mb:.2f} MB"
+    if file_size:
+        size_mb = file_size / (1024 * 1024)
+        size_str = f"{size_mb:.2f} MB"
+    else:
+        size_str = "未知"
     
     entry = f'''  <entry>
     <title>{title}</title>
@@ -125,7 +155,7 @@ def build_opds_entry(book: Book, base_url: str, author_name: Optional[str] = Non
     <link rel="http://opds-spec.org/acquisition" 
           href="{download_link}" 
           type="{mime_type}"
-          title="下载 {escape_xml(book.file_format.upper())}"/>
+          title="下载 {escape_xml(file_format.upper())}"/>
     
     <link rel="http://opds-spec.org/image" 
           href="{cover_link}" 
@@ -135,7 +165,7 @@ def build_opds_entry(book: Book, base_url: str, author_name: Optional[str] = Non
           href="{cover_link}" 
           type="image/jpeg"/>
     
-    <category term="{escape_xml(book.file_format)}" label="格式"/>
+    <category term="{escape_xml(file_format)}" label="格式"/>
 '''
     
     # 添加内容分级
@@ -143,7 +173,7 @@ def build_opds_entry(book: Book, base_url: str, author_name: Optional[str] = Non
         entry += f'    <category term="{escape_xml(book.age_rating)}" label="分级"/>\n'
     
     # 添加文件信息
-    entry += f'''    <content type="text">格式: {escape_xml(book.file_format.upper())} | 大小: {size_str}</content>
+    entry += f'''    <content type="text">格式: {escape_xml(file_format.upper())} | 大小: {size_str}</content>
   </entry>
 '''
     

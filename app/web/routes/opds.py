@@ -8,13 +8,14 @@ from typing import Optional
 import base64
 
 from fastapi import APIRouter, Depends, Query, Request, Response, HTTPException, Header
+from fastapi.responses import FileResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.database import get_db
-from app.models import Author, Book, User
+from app.models import Author, Book, Library, User
 from app.security import verify_password
 from app.utils.logger import log
 from app.utils.opds_builder import (
@@ -156,7 +157,11 @@ async def opds_recent_books(
         return Response(content=xml, media_type="application/atom+xml;profile=opds-catalog;kind=acquisition")
     
     # 查询可访问书库中的书籍
-    query = select(Book).options(joinedload(Book.author), joinedload(Book.book_tags))
+    query = select(Book).options(
+        joinedload(Book.author),
+        joinedload(Book.book_tags),
+        joinedload(Book.versions),
+    )
     query = query.where(Book.library_id.in_(accessible_library_ids))
     query = query.order_by(Book.added_at.desc())
     
@@ -301,7 +306,11 @@ async def opds_author_books(
         return Response(content=xml, media_type="application/atom+xml;profile=opds-catalog;kind=acquisition")
     
     # 查询作者的书籍（限定在可访问书库中）
-    query = select(Book).options(joinedload(Book.author), joinedload(Book.book_tags))
+    query = select(Book).options(
+        joinedload(Book.author),
+        joinedload(Book.book_tags),
+        joinedload(Book.versions),
+    )
     query = query.where(Book.author_id == author_id)
     query = query.where(Book.library_id.in_(accessible_library_ids))
     query = query.order_by(Book.title)
@@ -385,7 +394,11 @@ async def opds_search(
     
     # 构建搜索查询
     search_term = f"%{q}%"
-    query = select(Book).options(joinedload(Book.author), joinedload(Book.book_tags))
+    query = select(Book).options(
+        joinedload(Book.author),
+        joinedload(Book.book_tags),
+        joinedload(Book.versions),
+    )
     query = query.where(Book.library_id.in_(accessible_library_ids))
     
     # 搜索书名或作者名
@@ -432,6 +445,123 @@ async def opds_search(
     )
 
 
+@router.get("/libraries")
+async def opds_libraries_index(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_opds_user)
+):
+    """
+    书库索引 Feed
+    返回用户可访问的书库列表
+    """
+    base_url = get_base_url(request)
+    accessible_library_ids = await get_accessible_library_ids(current_user, db)
+
+    if not accessible_library_ids:
+        xml = build_opds_navigation_feed(
+            entries=[],
+            title="书库",
+            feed_id=f"{base_url}/opds/libraries",
+            base_url=base_url
+        )
+        return Response(content=xml, media_type="application/atom+xml;profile=opds-catalog;kind=navigation")
+
+    result = await db.execute(
+        select(Library)
+        .where(Library.id.in_(accessible_library_ids))
+        .order_by(Library.name)
+    )
+    libraries = result.scalars().all()
+
+    entries = []
+    for library in libraries:
+        entries.append({
+            'title': library.name,
+            'link': f"{base_url}/opds/library/{library.id}",
+            'content': "书库",
+            'id': f"{base_url}/opds/library/{library.id}"
+        })
+
+    xml = build_opds_navigation_feed(
+        entries=entries,
+        title="书库",
+        feed_id=f"{base_url}/opds/libraries",
+        base_url=base_url
+    )
+
+    return Response(
+        content=xml,
+        media_type="application/atom+xml;profile=opds-catalog;kind=navigation"
+    )
+
+
+@router.get("/library/{library_id}")
+async def opds_library_books(
+    library_id: int,
+    request: Request,
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_opds_user)
+):
+    """
+    书库书籍 Feed
+    返回指定书库的书籍列表
+    """
+    base_url = get_base_url(request)
+    accessible_library_ids = await get_accessible_library_ids(current_user, db)
+
+    if library_id not in accessible_library_ids:
+        xml = build_opds_acquisition_feed(
+            books=[],
+            title="无权访问书库",
+            feed_id=f"{base_url}/opds/library/{library_id}",
+            base_url=base_url,
+            page=1,
+            total_pages=1,
+            self_link=f"{base_url}/opds/library/{library_id}?page=1&limit={limit}"
+        )
+        return Response(content=xml, media_type="application/atom+xml;profile=opds-catalog;kind=acquisition")
+
+    query = select(Book).options(
+        joinedload(Book.author),
+        joinedload(Book.book_tags),
+        joinedload(Book.versions),
+    )
+    query = query.where(Book.library_id == library_id).order_by(Book.added_at.desc())
+
+    result = await db.execute(query)
+    all_books = result.scalars().all()
+
+    filtered_books = []
+    for book in all_books:
+        if await check_book_access(current_user, book.id, db):
+            filtered_books.append(book)
+
+    total_books = len(filtered_books)
+    total_pages = math.ceil(total_books / limit) if total_books > 0 else 1
+    start_idx = (page - 1) * limit
+    end_idx = start_idx + limit
+    paginated_books = filtered_books[start_idx:end_idx]
+
+    self_link = f"{base_url}/opds/library/{library_id}?page={page}&limit={limit}"
+    xml = build_opds_acquisition_feed(
+        books=paginated_books,
+        title="书库书籍",
+        feed_id=f"{base_url}/opds/library/{library_id}",
+        base_url=base_url,
+        page=page,
+        total_pages=total_pages,
+        self_link=self_link
+    )
+
+    return Response(
+        content=xml,
+        media_type="application/atom+xml;profile=opds-catalog;kind=acquisition"
+    )
+
+
 @router.get("/download/{book_id}")
 async def opds_download_book(
     book_id: int,
@@ -443,7 +573,11 @@ async def opds_download_book(
     验证权限后提供书籍文件下载
     """
     # 检查书籍是否存在
-    result = await db.execute(select(Book).where(Book.id == book_id))
+    result = await db.execute(
+        select(Book)
+        .options(joinedload(Book.versions))
+        .where(Book.id == book_id)
+    )
     book = result.scalar_one_or_none()
     
     if not book:
@@ -454,33 +588,37 @@ async def opds_download_book(
     if not has_access:
         return Response(content="无权访问此书籍", status_code=403)
     
-    # 读取文件
+    # 读取主版本文件
     try:
         import os
-        if not os.path.exists(book.file_path):
+        if not book.versions:
+            return Response(content="书籍版本不存在", status_code=404)
+
+        primary = next((v for v in book.versions if v.is_primary), None)
+        if not primary:
+            primary = book.versions[0]
+
+        if not os.path.exists(primary.file_path):
             return Response(content="文件不存在", status_code=404)
-        
-        with open(book.file_path, 'rb') as f:
-            content = f.read()
-        
+
         # 确定 MIME 类型
         mime_types = {
             'epub': 'application/epub+zip',
             'mobi': 'application/x-mobipocket-ebook',
+            'azw': 'application/vnd.amazon.ebook',
+            'azw3': 'application/vnd.amazon.ebook',
+            'pdf': 'application/pdf',
             'txt': 'text/plain; charset=utf-8',
+            'cbz': 'application/vnd.comicbook+zip',
+            'cbr': 'application/vnd.comicbook-rar',
         }
-        mime_type = mime_types.get(book.file_format.lower(), 'application/octet-stream')
-        
-        # 设置下载文件名
-        filename = f"{book.title}.{book.file_format}"
-        
-        return Response(
-            content=content,
+        mime_type = mime_types.get(primary.file_format.lower(), 'application/octet-stream')
+
+        filename = primary.file_name or f"{book.title}.{primary.file_format}"
+        return FileResponse(
+            primary.file_path,
             media_type=mime_type,
-            headers={
-                'Content-Disposition': f'attachment; filename="{filename}"',
-                'Content-Length': str(len(content))
-            }
+            filename=filename
         )
     except Exception as e:
         log.error(f"下载书籍失败: {e}")
