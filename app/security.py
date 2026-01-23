@@ -100,3 +100,42 @@ def decode_access_token(token: str) -> Optional[dict]:
         return payload
     except JWTError:
         return None
+
+
+def create_share_token(data: dict, expires_days: Optional[int] = None) -> str:
+    """
+    创建分享链接 Token
+
+    Args:
+        data: 要编码的数据
+        expires_days: 过期天数（默认使用配置）
+
+    Returns:
+        JWT Token字符串
+    """
+    to_encode = data.copy()
+    expire_days = expires_days or settings.security.share_token_expire_days
+    expire = datetime.utcnow() + timedelta(days=expire_days)
+    to_encode.update({"exp": expire, "typ": "share"})
+    encoded_jwt = jwt.encode(
+        to_encode,
+        settings.security.secret_key,
+        algorithm=settings.security.algorithm
+    )
+    return encoded_jwt
+
+
+def decode_share_token(token: str) -> Optional[dict]:
+    """
+    解码分享链接 Token
+
+    Args:
+        token: JWT Token字符串
+
+    Returns:
+        解码后的数据，如果失败返回None
+    """
+    payload = decode_access_token(token)
+    if not payload or payload.get("typ") != "share":
+        return None
+    return payload

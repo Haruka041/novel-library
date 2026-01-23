@@ -49,6 +49,7 @@ security:
   secret_key: "CHANGE_THIS_TO_A_RANDOM_SECRET_KEY"  # 请修改为随机密钥
   algorithm: HS256
   access_token_expire_minutes: 10080  # 7天
+  share_token_expire_days: 30  # 收藏分享链接过期天数
 
 # 日志配置
 logging:

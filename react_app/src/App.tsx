@@ -21,6 +21,7 @@ import AuthorsPage from './pages/AuthorsPage'
 import AnnotationsPage from './pages/AnnotationsPage'
 import UserSettingsPage from './pages/UserSettingsPage'
 import AboutPage from './pages/AboutPage'
+import SharedFavoritesPage from './pages/SharedFavoritesPage'
 
 // 需要认证的路由守卫
 const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
@@ -100,6 +101,7 @@ function App() {
         {/* 公开路由 */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/share/favorites" element={<SharedFavoritesPage />} />
 
         {/* 需要认证的路由 */}
         <Route element={<PrivateRoute><MainLayout /></PrivateRoute>}>

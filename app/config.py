@@ -58,6 +58,7 @@ class SecurityConfig(BaseModel):
     secret_key: str = "CHANGE_THIS_TO_A_RANDOM_SECRET_KEY"
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 10080  # 7天
+    share_token_expire_days: int = 30  # 收藏分享链接过期天数
 
 
 class LoggingConfig(BaseModel):
