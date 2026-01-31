@@ -3,7 +3,7 @@ import {
   Box, Typography, Button, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, Paper, IconButton, Chip, Alert, CircularProgress,
   Card, CardContent, Grid, Switch, FormControlLabel, Dialog, DialogTitle,
-  DialogContent, DialogActions
+  DialogContent, DialogActions, TextField, Divider
 } from '@mui/material'
 import { Backup, Download, Delete, Restore, PlayArrow, Schedule, Upload } from '@mui/icons-material'
 import api from '../../services/api'
@@ -21,8 +21,34 @@ interface BackupInfo {
 interface BackupStats {
   total_backups: number
   total_size: number
-  latest_backup: string | null
-  oldest_backup: string | null
+  total_size_mb?: number
+  backup_dir?: string
+  retention_count?: number
+  auto_backup_enabled?: boolean
+  latest_backup?: BackupInfo | null
+  oldest_backup?: string | null
+  webdav?: WebDAVSettings
+}
+
+interface WebDAVSettings {
+  enabled: boolean
+  url: string
+  username: string
+  password_configured: boolean
+  base_path: string
+  timeout: number
+  verify_ssl: boolean
+  source?: 'env' | 'config'
+}
+
+interface WebDAVFormState {
+  enabled: boolean
+  url: string
+  username: string
+  password: string
+  base_path: string
+  timeout: string
+  verify_ssl: boolean
 }
 
 interface SchedulerStatus {
@@ -42,7 +68,8 @@ export default function BackupTab() {
   const [stats, setStats] = useState<BackupStats | null>(null)
   const [scheduler, setScheduler] = useState<SchedulerStatus | null>(null)
   const [creating, setCreating] = useState(false)
-  
+  const [webdav, setWebdav] = useState<WebDAVSettings | null>(null)
+
   // 上传相关
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -51,6 +78,19 @@ export default function BackupTab() {
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false)
   const [selectedBackup, setSelectedBackup] = useState<BackupInfo | null>(null)
   const [restoring, setRestoring] = useState(false)
+
+  // WebDAV 配置对话框
+  const [webdavDialogOpen, setWebdavDialogOpen] = useState(false)
+  const [webdavSaving, setWebdavSaving] = useState(false)
+  const [webdavForm, setWebdavForm] = useState<WebDAVFormState>({
+    enabled: false,
+    url: '',
+    username: '',
+    password: '',
+    base_path: '',
+    timeout: '60',
+    verify_ssl: true
+  })
 
   const token = useAuthStore(state => state.token)
 
@@ -63,15 +103,17 @@ export default function BackupTab() {
       setLoading(true)
       setError('')
       
-      const [backupsRes, statsRes, schedulerRes] = await Promise.all([
+      const [backupsRes, statsRes, schedulerRes, webdavRes] = await Promise.all([
         api.get<{ backups: BackupInfo[] }>('/api/admin/backup/list'),
         api.get<BackupStats>('/api/admin/backup/stats'),
-        api.get<SchedulerStatus>('/api/admin/backup/scheduler/status')
+        api.get<SchedulerStatus>('/api/admin/backup/scheduler/status'),
+        api.get<WebDAVSettings>('/api/admin/backup/webdav')
       ])
       
       setBackups(backupsRes.data.backups)
       setStats(statsRes.data)
       setScheduler(schedulerRes.data)
+      setWebdav(webdavRes.data)
     } catch (err) {
       console.error('加载备份数据失败:', err)
       setError('加载失败')
@@ -84,11 +126,20 @@ export default function BackupTab() {
     try {
       setCreating(true)
       setError('')
-      await api.post('/api/admin/backup/create', {
+      const res = await api.post('/api/admin/backup/create', {
         includes: ['database', 'covers', 'config'],
         description: '手动创建'
       })
-      setSuccess('备份创建成功')
+      const webdavResult = res.data?.webdav
+      if (webdavResult?.enabled) {
+        if (webdavResult.success) {
+          setSuccess('备份创建成功并已上传到 WebDAV')
+        } else {
+          setSuccess(`备份创建成功，但 WebDAV 上传失败：${webdavResult.error || '未知错误'}`)
+        }
+      } else {
+        setSuccess('备份创建成功')
+      }
       loadData()
     } catch (err) {
       console.error('创建备份失败:', err)
@@ -201,6 +252,46 @@ export default function BackupTab() {
     }
   }
 
+  const openWebdavDialog = () => {
+    if (webdav) {
+      setWebdavForm({
+        enabled: webdav.enabled,
+        url: webdav.url || '',
+        username: webdav.username || '',
+        password: '',
+        base_path: webdav.base_path || '',
+        timeout: String(webdav.timeout ?? 60),
+        verify_ssl: webdav.verify_ssl ?? true
+      })
+    }
+    setWebdavDialogOpen(true)
+  }
+
+  const handleSaveWebdav = async () => {
+    try {
+      setWebdavSaving(true)
+      const payload = {
+        enabled: webdavForm.enabled,
+        url: webdavForm.url.trim(),
+        username: webdavForm.username.trim(),
+        password: webdavForm.password.trim() || undefined,
+        base_path: webdavForm.base_path.trim(),
+        timeout: Number(webdavForm.timeout) || 60,
+        verify_ssl: webdavForm.verify_ssl
+      }
+      const res = await api.put('/api/admin/backup/webdav', payload)
+      const needRestart = res.data?.requires_restart
+      setSuccess(needRestart ? 'WebDAV 配置已保存（检测到环境变量，可能需重启或移除 env 才生效）' : 'WebDAV 配置已保存')
+      setWebdavDialogOpen(false)
+      loadData()
+    } catch (err) {
+      console.error('保存 WebDAV 配置失败:', err)
+      setError('保存 WebDAV 配置失败')
+    } finally {
+      setWebdavSaving(false)
+    }
+  }
+
   const formatSize = (bytes: number) => {
     if (bytes < 1024) return bytes + ' B'
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
@@ -227,7 +318,7 @@ export default function BackupTab() {
 
       {/* 统计信息和自动备份 */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid item xs={12} md={6}>
+        <Grid item xs={12} md={4}>
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>备份统计</Typography>
@@ -241,10 +332,18 @@ export default function BackupTab() {
                   <Typography variant="body2" color="text.secondary">总大小</Typography>
                 </Box>
               </Box>
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="body2" color="text.secondary">
+                  保留数量: {stats?.retention_count ?? '-'}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  最新备份: {stats?.latest_backup?.backup_id ?? '-'}
+                </Typography>
+              </Box>
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} md={6}>
+        <Grid item xs={12} md={4}>
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>自动备份</Typography>
@@ -271,6 +370,43 @@ export default function BackupTab() {
                   下次执行: {formatDate(scheduler.next_run)}
                 </Typography>
               )}
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} md={4}>
+          <Card>
+            <CardContent>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+                <Typography variant="h6">WebDAV 云端备份</Typography>
+                <Chip
+                  size="small"
+                  color={webdav?.enabled ? 'success' : 'default'}
+                  label={webdav?.enabled ? '已启用' : '未启用'}
+                />
+              </Box>
+              <Typography variant="body2" color="text.secondary">
+                地址: {webdav?.url || '-'}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                目录: {webdav?.base_path || '-'}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                账号: {webdav?.username || '-'}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                密码: {webdav?.password_configured ? '已设置' : '未设置'}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                SSL 校验: {webdav?.verify_ssl ? '开启' : '关闭'}
+              </Typography>
+              {webdav?.source && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                  配置来源: {webdav.source === 'env' ? '环境变量' : 'config.yaml'}
+                </Typography>
+              )}
+              <Button variant="outlined" size="small" sx={{ mt: 2 }} onClick={openWebdavDialog}>
+                配置 WebDAV
+              </Button>
             </CardContent>
           </Card>
         </Grid>
@@ -367,6 +503,86 @@ export default function BackupTab() {
           </TableBody>
         </Table>
       </TableContainer>
+
+      {/* WebDAV 配置对话框 */}
+      <Dialog open={webdavDialogOpen} onClose={() => setWebdavDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>WebDAV 云端备份设置</DialogTitle>
+        <DialogContent>
+          {webdav?.source === 'env' && (
+            <Alert severity="warning" sx={{ mb: 2 }}>
+              检测到 WebDAV 配置来自环境变量，保存后可能需要重启或移除环境变量才会生效。
+            </Alert>
+          )}
+          <FormControlLabel
+            control={
+              <Switch
+                checked={webdavForm.enabled}
+                onChange={(e) => setWebdavForm(prev => ({ ...prev, enabled: e.target.checked }))}
+              />
+            }
+            label="启用 WebDAV 云端备份"
+          />
+          <Divider sx={{ my: 2 }} />
+          <TextField
+            label="WebDAV URL"
+            value={webdavForm.url}
+            onChange={(e) => setWebdavForm(prev => ({ ...prev, url: e.target.value }))}
+            fullWidth
+            margin="dense"
+            placeholder="https://dav.example.com/remote.php/webdav"
+          />
+          <TextField
+            label="用户名"
+            value={webdavForm.username}
+            onChange={(e) => setWebdavForm(prev => ({ ...prev, username: e.target.value }))}
+            fullWidth
+            margin="dense"
+          />
+          <TextField
+            label="密码（留空保持不变）"
+            type="password"
+            value={webdavForm.password}
+            onChange={(e) => setWebdavForm(prev => ({ ...prev, password: e.target.value }))}
+            fullWidth
+            margin="dense"
+          />
+          <TextField
+            label="远程目录"
+            value={webdavForm.base_path}
+            onChange={(e) => setWebdavForm(prev => ({ ...prev, base_path: e.target.value }))}
+            fullWidth
+            margin="dense"
+            placeholder="/sooklib-backups"
+          />
+          <TextField
+            label="超时时间（秒）"
+            type="number"
+            value={webdavForm.timeout}
+            onChange={(e) => setWebdavForm(prev => ({ ...prev, timeout: e.target.value }))}
+            fullWidth
+            margin="dense"
+          />
+          <FormControlLabel
+            control={
+              <Switch
+                checked={webdavForm.verify_ssl}
+                onChange={(e) => setWebdavForm(prev => ({ ...prev, verify_ssl: e.target.checked }))}
+              />
+            }
+            label="启用 SSL 校验"
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setWebdavDialogOpen(false)}>取消</Button>
+          <Button
+            variant="contained"
+            onClick={handleSaveWebdav}
+            disabled={webdavSaving}
+          >
+            {webdavSaving ? '保存中...' : '保存配置'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* 恢复确认对话框 */}
       <Dialog open={restoreDialogOpen} onClose={() => setRestoreDialogOpen(false)}>

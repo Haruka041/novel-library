@@ -3,6 +3,7 @@
 包括文件名分析、规则管理、备份管理等
 """
 import json
+import os
 from pathlib import Path
 from typing import List, Optional
 from datetime import datetime
@@ -12,9 +13,11 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
+import yaml
 
 from app.database import get_db
 from app.models import FilenamePattern, Library, LibraryPermission, LibraryTag, Book, User, BookTag, Tag, BookVersion
+from app.config import settings
 from app.core.ai import ai_config, get_ai_service
 from app.core.metadata.txt_parser import TxtParser
 from app.web.routes.auth import get_current_user
@@ -1391,6 +1394,47 @@ class BackupRestoreRequest(BaseModel):
     create_snapshot: bool = True
 
 
+class WebDAVConfigUpdateRequest(BaseModel):
+    """WebDAV 配置更新请求"""
+    enabled: bool = False
+    url: str = ""
+    username: str = ""
+    password: Optional[str] = None
+    base_path: str = ""
+    timeout: int = 60
+    verify_ssl: bool = True
+
+
+def _load_config_yaml() -> dict:
+    config_path = Path("config/config.yaml")
+    if not config_path.exists():
+        return {}
+    with config_path.open("r", encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
+
+def _save_config_yaml(config_data: dict) -> None:
+    config_path = Path("config/config.yaml")
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    with config_path.open("w", encoding="utf-8") as f:
+        yaml.safe_dump(config_data, f, allow_unicode=True, sort_keys=False)
+
+
+def _webdav_env_overrides() -> bool:
+    return any(
+        os.getenv(key)
+        for key in (
+            "WEBDAV_ENABLED",
+            "WEBDAV_URL",
+            "WEBDAV_USERNAME",
+            "WEBDAV_PASSWORD",
+            "WEBDAV_BASE_PATH",
+            "WEBDAV_TIMEOUT",
+            "WEBDAV_VERIFY_SSL",
+        )
+    )
+
+
 @router.post("/admin/backup/create")
 async def create_backup(
     request: BackupCreateRequest,
@@ -1646,6 +1690,71 @@ async def get_backup_stats(
     except Exception as e:
         log.error(f"获取备份统计失败: {e}")
         raise HTTPException(status_code=500, detail=f"获取备份统计失败: {str(e)}")
+
+
+@router.get("/admin/backup/webdav")
+async def get_webdav_settings(
+    current_user: User = Depends(admin_required)
+):
+    """
+    获取 WebDAV 备份配置（管理员）
+    """
+    return {
+        "enabled": settings.backup.webdav_enabled,
+        "url": settings.backup.webdav_url,
+        "username": settings.backup.webdav_username,
+        "password_configured": bool(settings.backup.webdav_password),
+        "base_path": settings.backup.webdav_base_path,
+        "timeout": settings.backup.webdav_timeout,
+        "verify_ssl": settings.backup.webdav_verify_ssl,
+        "source": "env" if _webdav_env_overrides() else "config",
+    }
+
+
+@router.put("/admin/backup/webdav")
+async def update_webdav_settings(
+    request: WebDAVConfigUpdateRequest,
+    current_user: User = Depends(admin_required)
+):
+    """
+    更新 WebDAV 备份配置（管理员）
+    """
+    try:
+        config_data = _load_config_yaml()
+        backup_config = config_data.setdefault("backup", {})
+
+        backup_config["webdav_enabled"] = request.enabled
+        backup_config["webdav_url"] = request.url or ""
+        backup_config["webdav_username"] = request.username or ""
+        backup_config["webdav_base_path"] = request.base_path or ""
+        backup_config["webdav_timeout"] = int(request.timeout)
+        backup_config["webdav_verify_ssl"] = bool(request.verify_ssl)
+
+        if request.password:
+            backup_config["webdav_password"] = request.password
+            settings.backup.webdav_password = request.password
+        elif "webdav_password" not in backup_config and settings.backup.webdav_password:
+            backup_config["webdav_password"] = settings.backup.webdav_password
+
+        _save_config_yaml(config_data)
+
+        settings.backup.webdav_enabled = request.enabled
+        settings.backup.webdav_url = request.url or ""
+        settings.backup.webdav_username = request.username or ""
+        settings.backup.webdav_base_path = request.base_path or ""
+        settings.backup.webdav_timeout = int(request.timeout)
+        settings.backup.webdav_verify_ssl = bool(request.verify_ssl)
+
+        log.info(f"管理员 {current_user.username} 更新了 WebDAV 备份配置")
+
+        return {
+            "message": "WebDAV 配置已更新",
+            "source": "env" if _webdav_env_overrides() else "config",
+            "requires_restart": _webdav_env_overrides(),
+        }
+    except Exception as e:
+        log.error(f"更新 WebDAV 配置失败: {e}")
+        raise HTTPException(status_code=500, detail=f"更新 WebDAV 配置失败: {str(e)}")
 
 
 # ==================== 定时备份调度器管理 API ====================
