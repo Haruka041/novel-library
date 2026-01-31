@@ -4,6 +4,9 @@
 
 # Sooklib - 书城/书库管理系统
 
+**语言 / Languages**：
+[简体中文](README.md) | [繁體中文](README.zh-TW.md) | [English](README.en.md) | [日本語](README.ja.md) | [Русский](README.ru.md) | [한국어](README.ko.md)
+
 Sooklib 是一个以书库为核心、对标 Emby 的书城/书库项目，强调管理、发现与持续阅读体验。
 在线阅读仅支持 TXT 并做深度优化，其它格式仅提供下载阅读。
 
