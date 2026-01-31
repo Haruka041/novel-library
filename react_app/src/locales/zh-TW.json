@@ -1,0 +1,16 @@
+{
+  "nav": {
+    "home": "首頁",
+    "library": "書庫",
+    "profile": "我的",
+    "search": "搜尋"
+  },
+  "footer": {
+    "design_by": "設計與開發由"
+  },
+  "settings": {
+    "title": "使用者設定",
+    "language": "語言",
+    "language_desc": "選擇介面顯示語言"
+  }
+}

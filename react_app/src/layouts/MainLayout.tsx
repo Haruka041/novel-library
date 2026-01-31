@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { Box, AppBar, Toolbar, Typography, IconButton, Avatar, BottomNavigation, BottomNavigationAction, Link, useMediaQuery, useTheme } from '@mui/material'
 import { Home, LibraryBooks, Person, Search } from '@mui/icons-material'
+import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '../stores/authStore'
 import { useSettingsStore } from '../stores/settingsStore'
 
@@ -12,6 +13,7 @@ const MainLayout = () => {
   const isMobile = useMediaQuery(theme.breakpoints.down('md'))
   const user = useAuthStore((state) => state.user)
   const { serverName, loadServerSettings } = useSettingsStore()
+  const { t } = useTranslation()
 
   // 加载服务器设置
   useEffect(() => {
@@ -75,7 +77,7 @@ const MainLayout = () => {
             borderColor: 'divider',
           }}
         >
-          设计与开发由{' '}
+          {t('footer.design_by')}{' '}
           <Link
             href="https://github.com/sooklib"
             target="_blank"
@@ -126,9 +128,9 @@ const MainLayout = () => {
             zIndex: theme.zIndex.appBar + 1,
           }}
         >
-          <BottomNavigationAction label="首页" icon={<Home />} />
-          <BottomNavigationAction label="书库" icon={<LibraryBooks />} />
-          <BottomNavigationAction label="我的" icon={<Person />} />
+          <BottomNavigationAction label={t('nav.home')} icon={<Home />} />
+          <BottomNavigationAction label={t('nav.library')} icon={<LibraryBooks />} />
+          <BottomNavigationAction label={t('nav.profile')} icon={<Person />} />
         </BottomNavigation>
       )}
     </Box>

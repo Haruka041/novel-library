@@ -1,0 +1,16 @@
+{
+  "nav": {
+    "home": "홈",
+    "library": "라이브러리",
+    "profile": "내 정보",
+    "search": "검색"
+  },
+  "footer": {
+    "design_by": "디자인 및 개발"
+  },
+  "settings": {
+    "title": "사용자 설정",
+    "language": "언어",
+    "language_desc": "인터페이스 언어 선택"
+  }
+}

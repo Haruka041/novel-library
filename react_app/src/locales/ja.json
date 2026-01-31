@@ -1,0 +1,16 @@
+{
+  "nav": {
+    "home": "ホーム",
+    "library": "ライブラリ",
+    "profile": "マイページ",
+    "search": "検索"
+  },
+  "footer": {
+    "design_by": "設計・開発"
+  },
+  "settings": {
+    "title": "ユーザー設定",
+    "language": "言語",
+    "language_desc": "表示言語を選択"
+  }
+}

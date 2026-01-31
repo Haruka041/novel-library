@@ -1,0 +1,16 @@
+{
+  "nav": {
+    "home": "首页",
+    "library": "书库",
+    "profile": "我的",
+    "search": "搜索"
+  },
+  "footer": {
+    "design_by": "设计与开发由"
+  },
+  "settings": {
+    "title": "用户设置",
+    "language": "语言",
+    "language_desc": "选择界面显示语言"
+  }
+}

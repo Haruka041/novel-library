@@ -1,6 +1,7 @@
-import { Box, Typography, Card, CardContent, ToggleButtonGroup, ToggleButton, IconButton, Button, CircularProgress, Snackbar, Alert, Dialog, DialogTitle, DialogContent, DialogActions, Chip, TextField, Avatar } from '@mui/material'
+import { Box, Typography, Card, CardContent, ToggleButtonGroup, ToggleButton, IconButton, Button, CircularProgress, Snackbar, Alert, Dialog, DialogTitle, DialogContent, DialogActions, Chip, TextField, Avatar, FormControl, InputLabel, Select, MenuItem, SelectChangeEvent } from '@mui/material'
 import { SettingsBrightness, LightMode, DarkMode, Palette, Image, PhotoSizeSelectLarge, ViewList, AllInclusive, Telegram, Link, LinkOff, ContentCopy, CheckCircle, PhotoCamera } from '@mui/icons-material'
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useThemeStore, PRESET_COLORS } from '../stores/themeStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useAuthStore } from '../stores/authStore'
@@ -8,9 +9,11 @@ import api from '../services/api'
 import { extractDominantColor } from '../utils/colorUtils'
 
 export default function UserSettingsPage() {
+  const { i18n, t } = useTranslation()
   const { preference, setPreference, primaryColor, setPrimaryColor } = useThemeStore()
   const { coverSize, setCoverSize, paginationMode, setPaginationMode } = useSettingsStore()
   const { checkAuth } = useAuthStore()
+  const [language, setLanguage] = useState(() => i18n.language || 'zh-CN')
   const [extracting, setExtracting] = useState(false)
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>(
     { open: false, message: '', severity: 'success' }
@@ -194,10 +197,25 @@ export default function UserSettingsPage() {
     }
   }
 
+  const languageOptions = [
+    { value: 'zh-CN', label: '简体中文' },
+    { value: 'zh-TW', label: '繁體中文' },
+    { value: 'en', label: 'English' },
+    { value: 'ja', label: '日本語' },
+    { value: 'ru', label: 'Русский' },
+    { value: 'ko', label: '한국어' },
+  ]
+
+  const handleLanguageChange = (event: SelectChangeEvent) => {
+    const value = event.target.value as string
+    setLanguage(value)
+    i18n.changeLanguage(value)
+  }
+
   return (
     <Box sx={{ p: 3 }}>
       <Typography variant="h4" fontWeight="bold" sx={{ mb: 3 }}>
-        用户设置
+        {t('settings.title')}
       </Typography>
 
       {/* 个人资料 */}
@@ -247,6 +265,33 @@ export default function UserSettingsPage() {
               {profileSaving ? '保存中...' : '保存昵称'}
             </Button>
           </Box>
+        </CardContent>
+      </Card>
+
+      {/* 语言设置 */}
+      <Card sx={{ mb: 3 }}>
+        <CardContent>
+          <Typography variant="h6" sx={{ mb: 1 }}>
+            {t('settings.language')}
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            {t('settings.language_desc')}
+          </Typography>
+          <FormControl size="small" sx={{ mt: 2, minWidth: 240 }}>
+            <InputLabel id="language-select-label">{t('settings.language')}</InputLabel>
+            <Select
+              labelId="language-select-label"
+              value={language}
+              label={t('settings.language')}
+              onChange={handleLanguageChange}
+            >
+              {languageOptions.map((option) => (
+                <MenuItem key={option.value} value={option.value}>
+                  {option.label}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
         </CardContent>
       </Card>
 
